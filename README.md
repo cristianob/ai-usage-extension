@@ -16,14 +16,26 @@ This is a decoupled fork of GnomeCodexBar, maintained independently.
 
 ---
 
-## Install
+## Quick start
 
 ```bash
+# 1. install the CLI and the extension build for your GNOME version
 curl -fsSL https://raw.githubusercontent.com/cristianob/ai-usage-extension/main/install.sh | bash
+
+# 2. load the extension
+#    GNOME 42-44 on X11:   Alt+F2, type r, Enter
+#    Wayland or GNOME 45+: log out and back in
+
+# 3. add your API keys
+gnome-extensions prefs ai-usage@local
 ```
 
-That installs the `ai-usage` CLI and the extension variant matching your GNOME
-version. It never prompts, so it is safe to pipe. Options:
+The installer never prompts, so it is safe to pipe. It puts the checkout in
+`~/.local/share/ai-usage-extension` (re-running it updates), and installs the CLI
+with `pipx` when available, otherwise into a private virtualenv symlinked into
+`~/.local/bin`.
+
+### Installer options
 
 ```bash
 # read it first if you would rather not pipe a script into bash
@@ -36,10 +48,6 @@ bash install.sh --no-extension  # CLI only
 bash install.sh --ref <tag>     # a specific tag or branch
 bash install.sh --uninstall     # remove everything except ~/.config/ai-usage
 ```
-
-The checkout lands in `~/.local/share/ai-usage-extension`; re-running the
-installer updates it. The CLI goes through `pipx` when available, otherwise into
-a private virtualenv symlinked into `~/.local/bin`.
 
 <details>
 <summary>From a clone instead</summary>
@@ -54,14 +62,6 @@ pipx install --force .  # the CLI
 ./dev.sh enable
 ```
 </details>
-
-Then load the extension: on GNOME 42–44 under X11 press **Alt+F2**, type **`r`**,
-Enter. On Wayland or GNOME 45+, log out and back in. Finally open the
-preferences to add your keys:
-
-```bash
-gnome-extensions prefs ai-usage@local
-```
 
 ### Check the backend from a terminal
 
