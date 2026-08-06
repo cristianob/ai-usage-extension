@@ -1,27 +1,35 @@
 
 Focus: rules for usage and testing of features.
 
+Project identity
+- Local, decoupled fork of GnomeCodexBar. No upstream remote; do not add one.
+- CLI/TUI is "AI Usage TUI" (`ai-usage`, package `ai_usage`).
+- GNOME extension is "AI Usage Extension" (uuid `ai-usage@local`).
+
 Manual smoke checks
-- usage-tui show
-- usage-tui show --provider claude
-- usage-tui show --provider codex --window 5h
-- usage-tui show --provider copilot
-- usage-tui show --json
-- usage-tui doctor
-- usage-tui env
-- usage-tui tui
-- usage-tui login --provider copilot
-- usage-tui login --provider claude
+- ai-usage show
+- ai-usage show --provider claude
+- ai-usage show --provider codex
+- ai-usage show --provider zai
+- ai-usage show --json
+- ai-usage doctor
+- ai-usage env
+- ai-usage tui
+- ai-usage login --provider claude
+- ai-usage refresh --provider all
+- ./token_refresh.sh once
+- extension/dev.sh install && extension/dev.sh reload && extension/dev.sh prefs
 
 Testing rules
-- Run usage-tui show and usage-tui tui for UI/CLI changes.
+- Run ai-usage show and ai-usage tui for UI/CLI changes.
+- For extension changes, install + reload the shell and open the popup, since bar
+  widths depend on real allocation.
 
 Versioning rules
 - ALWAYS read VERSIONLOG.md before making version changes or creating releases
 - Extension version in metadata.json is an integer (GNOME requirement), git tags use semantic versioning
 - Update VERSIONLOG.md with changes whenever bumping versions
-- Extension version numbering: metadata.json uses integers (1, 2, 3...), git tags use v1.0.0, v1.0.1, etc.
-- usage-tui uses standard semantic versioning (0.1.0, 0.1.1, etc.)
+- ai-usage uses standard semantic versioning (1.0.0, 1.0.1, etc.)
 
 Commit rules
-- Before committing, run the secret-scanner skill to check for env files and secrets, then follow the git-workflow skill.
+- Before committing, check for env files and secrets, then follow the git-workflow skill.

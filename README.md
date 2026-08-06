@@ -1,371 +1,149 @@
-# gnomecodexbar
+# AI Usage
 
-<p align="center">
-  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/license-Apache--2.0-4C1?style=flat-square" alt="License: Apache-2.0">
-  <img src="https://img.shields.io/badge/TUI-Textual-00A1FF?style=flat-square&logo=terminal&logoColor=white" alt="Textual">
-  <img src="https://img.shields.io/badge/platform-linux%20%7C%20macOS%20%7C%20windows-555?style=flat-square" alt="Platforms">
-</p>
+**Unified AI usage metrics in a fast terminal UI and a GNOME panel indicator.**
+Claude, Codex, Z.ai and OpenRouter, side by side.
 
-<p align="center">
-  <strong>Unified AI usage metrics in a fast terminal UI.</strong><br>
-  Claude, OpenAI, OpenRouter, GitHub Copilot, and Codex, side by side.
-</p>
+This is a decoupled local fork of GnomeCodexBar. It has no upstream remote and is
+maintained only here.
 
-<p align="center">
-  <a href="#quick-start">Quick Start</a> |
-  <a href="#features">Features</a> |
-  <a href="#supported-providers">Providers</a> |
-  <a href="#gnome-shell-extension">GNOME Extension</a> |
-  <a href="#screenshots">Screenshots</a> |
-  <a href="#contributing">Contributing</a>
-</p>
+Two pieces:
+
+- **AI Usage TUI** — the `ai-usage` CLI/TUI (Python, Textual)
+- **AI Usage Extension** — the GNOME Shell panel indicator in `extension/`
 
 ## Features
 
 - Interactive TUI built with Textual
-- Unified dashboard across multiple providers
+- Unified dashboard across providers
 - Scriptable CLI with JSON output
 - Cached requests to reduce API calls
-- Normalized output format for automation
-- Optional GNOME Shell extension in `extension/`
-- Multiple time windows (5h, 7d, 30d)
+- GNOME Shell panel indicator with per-window progress bars
+- Graphical preferences for API keys (no editing files by hand)
+- Multiple time windows (5h, 7d, 30d) where the provider offers them
 
-## Supported Providers
+## Supported providers
 
-| Provider | Status | Auth Required |
-|----------|--------|---------------|
-| Claude Code | OAuth (unofficial) | `CLAUDE_CODE_OAUTH_TOKEN` or Claude CLI |
-| OpenAI | Official API | `OPENAI_ADMIN_KEY` |
-| OpenRouter | Official API | `OPENROUTER_API_KEY` |
-| OpenAI Codex | OAuth (unofficial) | `~/.codex/auth.json` or `CODEX_ACCESS_TOKEN` |
-| GitHub Copilot | Device flow (internal API) | `usage-tui login --provider copilot` or `GITHUB_TOKEN` |
+| Provider | Windows | Auth |
+|----------|---------|------|
+| Claude Code | 5h + weekly | Claude CLI credentials, or `CLAUDE_CODE_OAUTH_TOKEN` |
+| OpenAI Codex | weekly only | `~/.codex/auth.json`, or `CODEX_ACCESS_TOKEN` |
+| Z.ai / ZCode (GLM Coding Plan) | 5h + weekly | ZCode / OpenCode / Claude Code credentials, or `ZAI_API_KEY` |
+| OpenRouter | credit limit window | `OPENROUTER_API_KEY` |
 
-## Quick Start
+Codex dropped its 5 hour window: the ChatGPT backend now returns a single
+`primary_window` covering 604800 seconds, so only a weekly bar is shown.
 
-```bash
-# From source
-pip install -e .
+### Z.ai credential discovery
 
-# Or with pipx
-pipx install .
+Like Claude and Codex, Z.ai needs no key of its own when another client already
+holds one. Probed in order:
 
-# Run setup wizard
-usage-tui setup
-```
+1. `ZAI_API_KEY` / `ZHIPU_API_KEY` (env var or `~/.config/ai-usage/env`)
+2. ZCode — `~/.zcode/v2/config.json` (`provider."builtin:zai-coding-plan".options.apiKey`),
+   plus `~/.zcode/v2/credentials.json` and the `~/.config/zcode/` layout
+3. OpenCode — `~/.local/share/opencode/auth.json` (`zai-coding-plan`, `zai`, `zhipu`, ...)
+4. Claude Code — `~/.claude/settings.json` when `ANTHROPIC_BASE_URL` points at
+   `api.z.ai` or `open.bigmodel.cn` (the GLM-in-Claude-Code setup)
 
-### One-line setup for each provider
+The Claude Code source is only trusted when the base URL really is a Z.ai host,
+so an Anthropic token is never sent to Z.ai. The platform (global vs. CN) is
+inferred from where the credential was found, and `ZAI_PLATFORM` overrides it.
 
-```bash
-# Claude Code (uses existing CLI auth)
-claude setup-token
+ZCode encrypts its OAuth tokens (`enc:v1:…`, Electron safeStorage); those values
+are rejected instead of being sent to the API. The coding-plan **API key** is
+stored in plaintext, so discovery works anyway. Endpoints, model ids and status
+strings are filtered out, and candidates are scored so the real key wins over a
+session JWT or an inactive plan entry.
 
-# GitHub Copilot (device flow)
-usage-tui login --provider copilot
+If the account has no active plan the endpoint answers HTTP 200 with an in-body
+error code; that is surfaced as `No active coding plan for this key`. The raw
+provider message is kept in the JSON `raw` payload only.
 
-# OpenAI / OpenRouter (set env vars)
-export OPENAI_ADMIN_KEY=sk-...
-export OPENROUTER_API_KEY=sk-or-...
-```
-
-## Usage
-
-### Interactive TUI
-
-```bash
-usage-tui tui
-```
-
-Keyboard shortcuts:
-- `r` - Refresh data
-- `5` - Switch to 5 hour window
-- `7` - Switch to 7 day window
-- `j` - Toggle raw JSON view
-- `q` - Quit
-
-### CLI Commands
+## Quick start
 
 ```bash
-# Show all providers
-usage-tui show
+# install the CLI (pipx recommended)
+pipx install --force ~/Git/ai-usage-extension
 
-# Show specific provider
-usage-tui show --provider claude
-usage-tui show --provider openai
+# configure keys interactively
+ai-usage setup
 
-# Change time window
-usage-tui show --window 5h
-usage-tui show --window 30d
+# check everything is wired up
+ai-usage doctor
 
-# Output as JSON (for scripting)
-usage-tui show --json
+# one-shot output
+ai-usage show
+ai-usage show --json
 
-# Check configuration
-usage-tui doctor
-
-# Show required env vars
-usage-tui env
+# full TUI
+ai-usage tui
 ```
 
-Notes:
-- Default `usage-tui show` prints both 5-hour and 7-day windows for Claude and Codex
-- Use `--window` to force a single window output
+`usage-tui` remains as an alias for `ai-usage` so older launchers keep working.
 
-## Screenshots
-
-![usage-tui demo](assets/usage-tui-demo.png)
-
-## GNOME Shell Extension
-
-The optional GNOME Shell extension displays AI usage metrics directly in your top panel.
-
-### Requirements
-
-- GNOME Shell 45, 46, 47, or 48
-- `usage-tui` CLI installed and configured
-
-### Installation
+## GNOME Shell extension
 
 ```bash
-# Create the extension directory
-mkdir -p ~/.local/share/gnome-shell/extensions/usage-tui@gnome.codexbar
-
-# Copy extension files
-cp extension/* ~/.local/share/gnome-shell/extensions/usage-tui@gnome.codexbar/
+extension/dev.sh install
+extension/dev.sh enable
+extension/dev.sh prefs     # graphical key configuration
+extension/dev.sh logs
 ```
 
-### Enabling the Extension
+UUID: `ai-usage@local`. Supported shell versions: 42–44.
 
-After copying the files, GNOME Shell must be restarted to detect the new extension.
+The indicator shows one progress bar per quota window per provider. The pinned
+panel number is always the **5h** window; providers without a 5h window (Codex)
+show their shortest window with its label, e.g. `7d 41%`.
 
-**X11 Session:**
-```bash
-# Press Alt+F2, type 'r', press Enter
-# Or run:
-busctl --user call org.gnome.Shell /org/gnome/Shell org.gnome.Shell Eval s 'Meta.restart("Reloading…")'
-```
+### Preferences
 
-**Wayland Session:**
-```bash
-# Log out and log back in (GNOME Shell cannot be restarted on Wayland)
-```
+`extension/dev.sh prefs` (or *Settings & API Keys* in the popup menu) opens a
+GTK/libadwaita window with:
 
-**After restarting GNOME Shell:**
-```bash
-# Enable the extension
-gnome-extensions enable usage-tui@gnome.codexbar
+- password fields for every provider key, saved to `~/.config/ai-usage/env` (mode 600)
+- Z.ai platform selector (global vs. CN)
+- pinned provider and refresh interval
+- buttons to run `ai-usage doctor`, open the TUI, and run the Claude/Codex CLI logins
 
-# Verify it's active
-gnome-extensions info usage-tui@gnome.codexbar
-```
+The extension watches `~/.config/ai-usage/extension.json`, so changes apply
+without reloading the shell.
 
-### Development
+## Configuration files
 
-Use the included dev script for extension development:
+| Path | Purpose |
+|------|---------|
+| `~/.config/ai-usage/env` | provider keys (`KEY=value` lines) |
+| `~/.config/ai-usage/extension.json` | panel provider, refresh interval |
+| `~/.cache/ai-usage/` | cached provider results |
 
-```bash
-cd extension
+The pre-rename `~/.config/usage-tui/` locations are still read when the new ones
+do not exist, so nothing breaks on upgrade; the first write lands in the new path.
 
-# Enable/disable extension
-./dev.sh enable
-./dev.sh disable
+## Token refresh daemon
 
-# Reload extension (disable + enable)
-./dev.sh reload
-
-# View extension logs
-./dev.sh logs
-
-# Start nested GNOME Shell for testing (Wayland)
-./dev.sh start
-```
-
-## Configuration
-
-### Quick Setup
-
-Run the interactive setup wizard:
+`token_refresh.sh` keeps long-lived credentials alive. Claude's are renewed by
+poking the Claude CLI; Codex's are refreshed against OpenAI's token endpoint and
+written back to `auth.json`.
 
 ```bash
-usage-tui setup
+./token_refresh.sh once            # one cycle, both providers
+./token_refresh.sh start codex     # daemonize, Codex only
+./token_refresh.sh status
+./token_refresh.sh stop
 ```
 
-This will prompt for API keys and save them to `~/.config/usage-tui/env`.
+Interval: `AI_USAGE_REFRESH_INTERVAL_SECONDS` (default 1800). The same work is
+available directly as `ai-usage refresh [--provider claude|codex|all] [--force]`.
 
-The env file uses simple `KEY=value` format. Environment variables override file values.
-
-### Manual Configuration
-
-### Claude Code (OAuth)
+## Development
 
 ```bash
-# Install and authenticate Claude CLI
-npm install -g @anthropics/claude
-claude setup-token
-
-# Optional: extract token (uses CLI credentials automatically)
-usage-tui login --provider claude
-
-# Or set explicitly
-export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
-```
-
-Notes:
-- Requires an OAuth token with the `user:profile` scope
-- Uses an unofficial endpoint and may change
-- Recommended: use Claude CLI credentials (unset `CLAUDE_CODE_OAUTH_TOKEN` unless you need to override)
-
-### OpenAI (Admin API)
-
-```bash
-export OPENAI_ADMIN_KEY=sk-...
-```
-
-### OpenRouter
-
-```bash
-export OPENROUTER_API_KEY=sk-or-...
-```
-
-### OpenAI Codex (ChatGPT backend)
-
-```bash
-# Install and authenticate Codex CLI
-npm install -g @openai/codex
-codex
-
-# Or set explicitly
-export CODEX_ACCESS_TOKEN=eyJ...
-
-Recommended: use Codex CLI credentials unless you need to override
-```
-
-### GitHub Copilot
-
-```bash
-# Device flow login (recommended)
-usage-tui login --provider copilot
-
-# Or set a token
-export GITHUB_TOKEN=ghp_...
-
-Recommended: use device flow login (avoids managing tokens)
-```
-
-## Project Structure
-
-```
-usage_tui/
-  __init__.py
-  cli.py           # CLI entry point
-  tui.py           # Textual TUI application
-  cache.py         # Caching layer
-  config.py        # Configuration management
-  providers/
-    __init__.py
-    base.py        # Base provider interface
-    claude_oauth.py    # Claude Code OAuth provider
-    openai_usage.py    # OpenAI usage provider
-    codex.py           # OpenAI Codex usage provider
-    copilot.py         # GitHub Copilot usage provider
-```
-
-## Architecture
-
-```text
-+---------------------------------------+
-|             usage-tui CLI             |
-|  CLI layer  |  TUI layer  |  GNOME UI |
-+----------------------+----------------+
-|        Provider cache and config      |
-+----------------------+----------------+
-| Claude | OpenAI | OpenRouter | Copilot |
-| Codex  | adapters with normalized data |
-+---------------------------------------+
-```
-
-## Normalized Output Format
-
-All providers return data in this normalized format:
-
-```json
-{
-  "provider": "claude | openai | copilot",
-  "window": "5h | 7d | 30d",
-  "metrics": {
-    "cost": 1.42,
-    "requests": 37,
-    "input_tokens": 120000,
-    "output_tokens": 54000,
-    "remaining": null,
-    "limit": null,
-    "reset_at": "ISO8601 | null"
-  },
-  "updated_at": "ISO8601",
-  "raw": {}
-}
-```
-
-## Roadmap
-
-Now:
-- [x] TUI dashboard
-- [x] Provider adapters for Claude, OpenAI, OpenRouter, Copilot, Codex
-- [x] JSON output for automation
-
-Next:
-- [ ] Waybar / i3blocks output mode
-- [ ] Prometheus exporter
-- [ ] Daily usage ledger
-- [ ] Budget alerts
-
-Later:
-- [ ] Optional local web dashboard
-- [ ] Team and org multi-account support
-- [ ] Notifications (Slack or Discord)
-
-## Contributing
-
-We welcome contributions of all sizes. A few great ways to help:
-
-- Add a provider adapter in `usage_tui/providers/`
-- Improve documentation and examples
-- Add tests for provider parsing
-- Add UI polish to the TUI
-- Extend desktop integrations
-
-Development setup:
-
-```bash
-# Install dev dependencies
-pip install -e ".[dev]"
-
-# Run linting
+pip install -e '.[dev]'
 ruff check .
-
-# Run type checking
-mypy usage_tui
-
-# Run tests
-pytest
+mypy ai_usage
 ```
-
-Manual smoke checks for UI and CLI changes:
-
-```bash
-usage-tui show
-usage-tui tui
-```
-
-## Known Limitations
-
-| Provider | Limitation |
-|----------|------------|
-| Claude | OAuth usage endpoint is unofficial and may change |
-| Copilot | Internal API, may lag or change |
-| OpenAI | Requires organization admin API key |
-| Codex | Uses ChatGPT backend OAuth, may change |
 
 ## License
 
-Apache-2.0. See `LICENSE`.
+MIT (see `LICENSE`).

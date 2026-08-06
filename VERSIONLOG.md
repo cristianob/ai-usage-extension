@@ -1,5 +1,47 @@
 # Version History
 
+## v2.0.0 (2026-08-06) - Extension version 4
+
+Renamed and decoupled: the project is now **AI Usage Extension** (uuid
+`ai-usage@local`) plus **AI Usage TUI** (`ai-usage`, package `ai_usage`).
+The upstream remote was removed; this repository is local-only.
+
+**Added**
+- Z.ai (GLM Coding Plan) provider: 5h + weekly token quota via
+  `/api/monitor/usage/quota/limit`, global and CN platforms
+- Graphical preferences (`prefs.js`): password fields for every provider key,
+  Z.ai platform selector, pinned provider, refresh interval, and buttons to run
+  doctor / the TUI / the Claude and Codex CLI logins
+- Extension watches `~/.config/ai-usage/extension.json` and applies changes live
+- `ai-usage` console script (with `usage-tui` kept as an alias)
+
+**Fixed**
+- Progress bar widths were computed from a single `get_width()` read in an idle
+  callback, which raced the first allocation: bars rendered tiny or empty. Fills
+  now track `notify::width` on their background and are re-applied when the menu
+  opens.
+- The pinned panel value is always the 5h window (it used to take the maximum of
+  all windows). Providers without a 5h window show their shortest window with a
+  label, e.g. `7d 41%`.
+- Codex is weekly-only now that its backend returns a single 604800 s
+  `primary_window`; window labels are derived from `limit_window_seconds`
+  instead of assuming primary = 5h.
+- Percentage-based quotas are no longer printed as "41.0 / 100.0 credits".
+
+- Z.ai credentials are discovered from ZCode / OpenCode / Claude Code instead of
+  requiring a pasted key (ZCode's plaintext coding-plan `apiKey`; its encrypted
+  `enc:v1:` OAuth tokens are rejected, and candidates are scored so endpoints,
+  status strings and session JWTs never win)
+- Panel window is configurable: 5h, 7d, or both separated by a bullet
+  (`46% · 59%`); single-window providers show their one window and money-based
+  providers (OpenRouter) show the amount spent
+- `ai-usage refresh` command and a generalized `token_refresh.sh` that also
+  refreshes Codex tokens (was Claude-only)
+
+**Removed**
+- GitHub Copilot provider, its device-flow login and credential store
+- OpenAI platform provider (`OPENAI_ADMIN_KEY`)
+
 ## Extension Versions
 
 ### v1.0.1 (2026-02-15) - Extension version 3
