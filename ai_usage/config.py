@@ -76,6 +76,7 @@ class Config:
         ProviderName.OPENROUTER: "OPENROUTER_API_KEY",
         ProviderName.CODEX: "CODEX_ACCESS_TOKEN",
         ProviderName.ZAI: "ZAI_API_KEY",
+        ProviderName.KIMI: "KIMI_API_KEY",
     }
 
     # Provider descriptions
@@ -103,6 +104,12 @@ class Config:
             "description": "Z.ai GLM Coding Plan / ZCode 5h + weekly token quota",
             "official": False,
             "note": "Reuses ZCode / OpenCode / Claude Code credentials when present",
+        },
+        ProviderName.KIMI: {
+            "name": "Kimi Code",
+            "description": "Kimi Code (Moonshot AI) coding plan quota windows",
+            "official": False,
+            "note": "Needs a Kimi Code key (sk-kimi-...), not an open-platform key",
         },
     }
 
@@ -135,6 +142,18 @@ class Config:
             creds = store.load()
             return creds.access_token if creds else None
 
+        if provider == ProviderName.KIMI:
+            # The CLI's own variable name for the same key.
+            if token := os.environ.get("KIMI_CODING_API_KEY"):
+                return token
+            if token := load_env_file().get("KIMI_CODING_API_KEY"):
+                return token
+
+            from ai_usage.providers.kimi import KimiCredentialStore
+
+            found = KimiCredentialStore().load()
+            return found[0] if found else None
+
         if provider == ProviderName.ZAI:
             # Accept the CN key as a fallback for the same provider.
             if token := os.environ.get("ZHIPU_API_KEY"):
@@ -162,6 +181,7 @@ class Config:
             OpenRouterUsageProvider,
             CodexProvider,
             ZaiProvider,
+            KimiProvider,
         )
 
         provider_map = {
@@ -169,6 +189,7 @@ class Config:
             ProviderName.OPENROUTER: OpenRouterUsageProvider,
             ProviderName.CODEX: CodexProvider,
             ProviderName.ZAI: ZaiProvider,
+            ProviderName.KIMI: KimiProvider,
         }
 
         provider_class = provider_map.get(provider)

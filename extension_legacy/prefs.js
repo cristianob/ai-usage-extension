@@ -10,7 +10,7 @@ const SETTINGS_PATH = CONFIG_DIR + '/extension.json';
 
 const CLI_NAME = 'ai-usage';
 
-const PROVIDERS = ['claude', 'codex', 'zai', 'openrouter'];
+const PROVIDERS = ['claude', 'codex', 'zai', 'kimi', 'openrouter'];
 
 const PANEL_WINDOWS = [
     {id: '5h', label: '5h only'},
@@ -31,6 +31,12 @@ const KEY_FIELDS = [
         title: 'Z.ai API key',
         subtitle: 'GLM Coding Plan / ZCode quota - found automatically when ZCode is installed',
         link: 'https://z.ai/manage-apikey/apikey-list',
+    },
+    {
+        name: 'KIMI_API_KEY',
+        title: 'Kimi Code API key',
+        subtitle: 'Coding plan (sk-kimi-...) - usually detected automatically',
+        link: 'https://www.kimi.com/code',
     },
     {
         name: 'OPENROUTER_API_KEY',

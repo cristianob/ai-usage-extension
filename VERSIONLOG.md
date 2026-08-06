@@ -1,5 +1,21 @@
 # Version History
 
+## v2.4.0 (2026-08-06) - Extension version 5
+
+**Added**
+- Kimi Code (Moonshot AI) provider. Quota comes from the coding-plan
+  `GET /coding/v1/usages` endpoint (falling back to `/usage`), and both response
+  shapes seen in the wild are parsed. Windows are emitted as a generic
+  `raw.windows` array, which both extension variants now render, so a plan with
+  windows other than 5h/7d shows them as they are
+- Kimi credentials are discovered from the Kimi Code CLI's `~/.kimi/config.toml`
+  `[providers.*]` tables, OpenCode's `auth.json`, or Claude Code settings whose
+  `ANTHROPIC_BASE_URL` is a Kimi host. Candidates are scored so a coding-plan
+  `sk-kimi-…` key beats an open-platform key, which cannot read usage at all
+- `tomli` is a dependency on Python 3.10 only (3.11+ has `tomllib`); without it
+  the TOML source is skipped rather than breaking the package
+
+
 ## v2.3.0 (2026-08-06) - Extension version 5
 
 **Fixed**
@@ -11,6 +27,7 @@
   are now within 0.5pp of their percentage (sub-pixel rounding on a 182px
   track). Drops the `notify::width` plumbing, the open-state re-apply pass and
   the bar registry along with it
+
 
 ## v2.2.0 (2026-08-06) - Extension version 4
 
@@ -25,6 +42,7 @@
   `ai-usage` remains), the extension and its preferences no longer look for a
   `usage-tui` binary, a `USAGE_TUI_PATH` override, or config under
   `~/.config/usage-tui/`, and that directory has been deleted after migration
+
 
 ## v2.1.0 (2026-08-06) - Extension version 4
 
@@ -44,6 +62,7 @@
 **Changed**
 - both variants log through `console.log` instead of the deprecated `log()`
 - docs rewritten around the dual-variant layout and the shared Python backend
+
 
 ## v2.0.0 (2026-08-06) - Extension version 4
 
@@ -87,6 +106,7 @@ The upstream remote was removed; this repository is local-only.
 - GitHub Copilot provider, its device-flow login and credential store
 - OpenAI platform provider (`OPENAI_ADMIN_KEY`)
 
+
 ## Extension Versions
 
 ### v1.0.1 (2026-02-15) - Extension version 3
@@ -110,6 +130,7 @@ The upstream remote was removed; this repository is local-only.
 
 ---
 
+
 ## Python Package Versions (released as `usage-tui` before v2.0.0)
 
 ### v0.1.1 (2026-02-15)
@@ -127,6 +148,7 @@ The upstream remote was removed; this repository is local-only.
 - OAuth device flow for Copilot authentication
 
 ---
+
 
 ## Version Numbering
 

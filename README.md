@@ -1,7 +1,7 @@
 # AI Usage
 
 **AI provider quotas in a GNOME panel indicator and a terminal UI.**
-Claude, Codex, Z.ai and OpenRouter, side by side.
+Claude, Codex, Z.ai, Kimi Code and OpenRouter, side by side.
 
 Two pieces:
 
@@ -81,11 +81,30 @@ ai-usage tui         # full TUI
 | Claude Code | 5h + weekly | Claude CLI credentials, or `CLAUDE_CODE_OAUTH_TOKEN` |
 | OpenAI Codex | weekly only | `~/.codex/auth.json`, or `CODEX_ACCESS_TOKEN` |
 | Z.ai / ZCode (GLM Coding Plan) | 5h + weekly | ZCode / OpenCode / Claude Code credentials, or `ZAI_API_KEY` |
+| Kimi Code (Moonshot AI) | whatever the plan has | Kimi CLI / OpenCode / Claude Code credentials, or `KIMI_API_KEY` |
 | OpenRouter | spend-limit window | `OPENROUTER_API_KEY` |
 
 Codex dropped its 5 hour window: the ChatGPT backend now returns a single
 `primary_window` covering 604800 seconds, so only a weekly bar is shown. Window
 labels are always derived from the data, never from a provider's position.
+
+### Kimi Code credential discovery
+
+Same idea, probed in order:
+
+1. `KIMI_API_KEY` / `KIMI_CODING_API_KEY` (env var or `~/.config/ai-usage/env`)
+2. **Kimi Code CLI** — `~/.kimi/config.toml` (also `~/.kimi-code/` and the
+   `~/.config/` layouts), reading the `[providers.*]` tables
+3. **OpenCode** — `~/.local/share/opencode/auth.json`
+4. **Claude Code** — `~/.claude/settings.json` when `ANTHROPIC_BASE_URL` points
+   at a Kimi host
+
+It has to be a Kimi Code console key (`sk-kimi-…`); an open-platform key
+(`sk-…`, `api.moonshot.cn`) cannot read the usage endpoint, so candidates
+advertising the open platform lose to the ones that do not. Quota comes from
+`GET /coding/v1/usages` (older builds answer on `/usage`), and whatever windows
+the plan reports are rendered as-is instead of being forced into 5h/7d slots.
+`KIMI_BASE_URL` overrides the base URL.
 
 ### Z.ai credential discovery
 

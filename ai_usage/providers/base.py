@@ -22,6 +22,7 @@ class ProviderName(str, Enum):
     CLAUDE = "claude"
     CODEX = "codex"
     ZAI = "zai"
+    KIMI = "kimi"
     OPENROUTER = "openrouter"
 
 

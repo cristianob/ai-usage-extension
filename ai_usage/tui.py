@@ -28,6 +28,7 @@ from ai_usage.providers import (
     CodexProvider,
     OpenRouterUsageProvider,
     ZaiProvider,
+    KimiProvider,
 )
 from ai_usage.providers.base import (
     BaseProvider,
@@ -369,6 +370,7 @@ class UsageTUI(App):
             ProviderName.OPENROUTER: OpenRouterUsageProvider(),
             ProviderName.CODEX: CodexProvider(),
             ProviderName.ZAI: ZaiProvider(),
+            ProviderName.KIMI: KimiProvider(),
         }
         self.results: dict[ProviderName, ProviderResult | None] = {}
 
@@ -388,6 +390,7 @@ class UsageTUI(App):
                         ProviderCard(ProviderName.OPENROUTER, id="card-openrouter"),
                         ProviderCard(ProviderName.CODEX, id="card-codex"),
                         ProviderCard(ProviderName.ZAI, id="card-zai"),
+                        ProviderCard(ProviderName.KIMI, id="card-kimi"),
                         id="cards-container",
                     )
                 with TabPane("Raw JSON", id="json-tab"):

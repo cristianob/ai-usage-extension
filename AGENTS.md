@@ -37,6 +37,7 @@ Manual smoke checks
 - ai-usage show --provider claude
 - ai-usage show --provider codex
 - ai-usage show --provider zai
+- ai-usage show --provider kimi
 - ai-usage show --json
 - ai-usage doctor
 - ai-usage env

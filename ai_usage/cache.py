@@ -40,6 +40,7 @@ class ResultCache:
         ProviderName.CLAUDE: 60,  # 1 minute - quota changes quickly
         ProviderName.OPENROUTER: 180,  # 3 minutes - credits update periodically
         ProviderName.ZAI: 60,  # 1 minute - quota changes quickly
+        ProviderName.KIMI: 60,  # 1 minute - quota changes quickly
     }
 
     def __init__(self, cache_dir: Path | None = None) -> None:

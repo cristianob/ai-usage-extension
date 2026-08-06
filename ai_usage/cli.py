@@ -14,6 +14,7 @@ from ai_usage.providers import (
     OpenRouterUsageProvider,
     CodexProvider,
     ZaiProvider,
+    KimiProvider,
 )
 from ai_usage.providers.base import BaseProvider, ProviderError, ProviderName, WindowPeriod
 
@@ -24,6 +25,7 @@ def get_providers() -> dict[ProviderName, BaseProvider]:
         ProviderName.CLAUDE: ClaudeOAuthProvider(),
         ProviderName.CODEX: CodexProvider(),
         ProviderName.ZAI: ZaiProvider(),
+        ProviderName.KIMI: KimiProvider(),
         ProviderName.OPENROUTER: OpenRouterUsageProvider(),
     }
 
@@ -64,7 +66,7 @@ def _fetch_result(provider: BaseProvider, window: WindowPeriod):
 @click.group()
 @click.version_option()
 def main() -> None:
-    """Usage metrics TUI for Claude, Codex, Z.ai and OpenRouter."""
+    """Usage metrics TUI for Claude, Codex, Z.ai, Kimi Code and OpenRouter."""
     pass
 
 
@@ -73,7 +75,7 @@ def main() -> None:
     "--provider",
     "-p",
     default="all",
-    help="Provider to query (claude, codex, zai, openrouter, all)",
+    help="Provider to query (claude, codex, zai, kimi, openrouter, all)",
 )
 @click.option(
     "--window",
@@ -116,7 +118,7 @@ def show(provider: str, window: str, output_json: bool) -> None:
         show_dual_windows = (
             not output_json
             and window_source == ParameterSource.DEFAULT
-            and name in {ProviderName.CLAUDE, ProviderName.ZAI}
+            and name in {ProviderName.CLAUDE, ProviderName.ZAI, ProviderName.KIMI}
         )
 
         if show_dual_windows:
@@ -266,6 +268,18 @@ def setup() -> None:
     click.echo()
 
     updates: dict[str, str] = {}
+
+    # Kimi Code API key
+    click.echo(click.style("Kimi Code", bold=True))
+    click.echo("  Skip this if the Kimi Code CLI is set up - its key is picked up automatically.")
+    click.echo("  Otherwise use a Kimi Code console key (sk-kimi-...).")
+    kimi_key = click.prompt("  KIMI_API_KEY", default="", show_default=False).strip()
+    if kimi_key:
+        updates["KIMI_API_KEY"] = kimi_key
+        click.echo("  -> Set")
+    else:
+        click.echo("  -> Skipped")
+    click.echo()
 
     # OpenRouter API key
     click.echo(click.style("OpenRouter", bold=True))

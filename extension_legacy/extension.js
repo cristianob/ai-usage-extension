@@ -20,10 +20,10 @@ const SETTINGS_PATH = CONFIG_DIR + '/extension.json';
 const CLI_NAME = 'ai-usage';
 const CLI_PATH_ENV_VAR = 'AI_USAGE_PATH';
 
-const PROVIDER_ORDER = ['claude', 'codex', 'zai', 'openrouter'];
+const PROVIDER_ORDER = ['claude', 'codex', 'zai', 'kimi', 'openrouter'];
 
 /* Providers whose quota is expressed as a percentage, not as money/credits. */
-const PERCENT_QUOTA_PROVIDERS = ['claude', 'codex', 'zai'];
+const PERCENT_QUOTA_PROVIDERS = ['claude', 'codex', 'zai', 'kimi'];
 
 /* Providers measured in money: the panel shows the amount, not a percentage. */
 const MONEY_PROVIDERS = ['openrouter'];
@@ -442,6 +442,17 @@ class UsageIndicator extends PanelMenu.Button {
                 detail: detail || null,
             });
         };
+
+        /* Generic shape (Kimi Code): the provider already named its windows,
+         * so whatever set the plan has is rendered as-is. */
+        if (Array.isArray(raw.windows)) {
+            for (let entry of raw.windows) {
+                if (!entry || !entry.label)
+                    continue;
+                push(entry.label, entry.label, entry.utilization, entry.resets_at,
+                    this._tokenDetail(entry));
+            }
+        }
 
         /* Claude / Z.ai shape: named windows with utilization percentages. */
         const named = [
