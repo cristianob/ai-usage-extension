@@ -1,22 +1,33 @@
-"""Configuration management for usage-tui."""
+"""Configuration management for ai-usage."""
 
 import os
 from pathlib import Path
 from typing import Any
 
-from usage_tui.claude_cli_auth import extract_claude_cli_token
-from usage_tui.providers.base import ProviderName
+from ai_usage.claude_cli_auth import extract_claude_cli_token
+from ai_usage.providers.base import ProviderName
 
 # Env file location
-ENV_FILE_PATH = Path.home() / ".config" / "usage-tui" / "env"
+ENV_FILE_PATH = Path.home() / ".config" / "ai-usage" / "env"
+
+# Pre-rename location, still read when the current one is absent
+LEGACY_ENV_FILE_PATH = Path.home() / ".config" / "usage-tui" / "env"
+
+
+def env_file_path() -> Path:
+    """Path the env file is read from (new location wins, legacy as fallback)."""
+    if ENV_FILE_PATH.exists() or not LEGACY_ENV_FILE_PATH.exists():
+        return ENV_FILE_PATH
+    return LEGACY_ENV_FILE_PATH
 
 
 def load_env_file() -> dict[str, str]:
     """Load key=value pairs from env file. Returns empty dict if missing/unreadable."""
     result: dict[str, str] = {}
+    path = env_file_path()
     try:
-        if ENV_FILE_PATH.exists():
-            for line in ENV_FILE_PATH.read_text().splitlines():
+        if path.exists():
+            for line in path.read_text().splitlines():
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, _, value = line.partition("=")
@@ -33,9 +44,10 @@ def write_env_file(updates: dict[str, str]) -> None:
     existing_lines: list[str] = []
     existing_keys: set[str] = set()
 
+    source = env_file_path()
     try:
-        if ENV_FILE_PATH.exists():
-            existing_lines = ENV_FILE_PATH.read_text().splitlines()
+        if source.exists():
+            existing_lines = source.read_text().splitlines()
     except (OSError, PermissionError):
         pass
 
@@ -59,6 +71,7 @@ def write_env_file(updates: dict[str, str]) -> None:
             new_lines.append(f"{key}={value}")
 
     ENV_FILE_PATH.write_text("\n".join(new_lines) + "\n")
+    ENV_FILE_PATH.chmod(0o600)
 
 
 class Config:
@@ -72,10 +85,9 @@ class Config:
     # Environment variable mappings
     ENV_VARS = {
         ProviderName.CLAUDE: "CLAUDE_CODE_OAUTH_TOKEN",
-        ProviderName.OPENAI: "OPENAI_ADMIN_KEY",
         ProviderName.OPENROUTER: "OPENROUTER_API_KEY",
-        ProviderName.COPILOT: "GITHUB_TOKEN",
         ProviderName.CODEX: "CODEX_ACCESS_TOKEN",
+        ProviderName.ZAI: "ZAI_API_KEY",
     }
 
     # Provider descriptions
@@ -86,29 +98,23 @@ class Config:
             "official": False,
             "note": "Uses unofficial OAuth endpoint with beta header",
         },
-        ProviderName.OPENAI: {
-            "name": "OpenAI",
-            "description": "OpenAI API usage and costs",
-            "official": True,
-            "note": "Requires organization admin API key",
-        },
         ProviderName.OPENROUTER: {
             "name": "OpenRouter",
             "description": "OpenRouter API credits and usage",
             "official": True,
             "note": "Uses /api/v1/key for credits and limits",
         },
-        ProviderName.COPILOT: {
-            "name": "GitHub Copilot",
-            "description": "GitHub Copilot quota via internal API",
-            "official": False,
-            "note": "Uses VS Code client ID for device flow auth",
-        },
         ProviderName.CODEX: {
             "name": "OpenAI Codex",
-            "description": "OpenAI Codex usage via ChatGPT backend",
+            "description": "OpenAI Codex weekly usage via ChatGPT backend",
             "official": False,
             "note": "Reads credentials from ~/.codex/auth.json",
+        },
+        ProviderName.ZAI: {
+            "name": "Z.ai",
+            "description": "Z.ai GLM Coding Plan / ZCode 5h + weekly token quota",
+            "official": False,
+            "note": "Reuses ZCode / OpenCode / Claude Code credentials when present",
         },
     }
 
@@ -135,17 +141,24 @@ class Config:
             return extract_claude_cli_token()
 
         if provider == ProviderName.CODEX:
-            from usage_tui.providers.codex import CodexCredentialStore
+            from ai_usage.providers.codex import CodexCredentialStore
 
             store = CodexCredentialStore()
             creds = store.load()
             return creds.access_token if creds else None
 
-        if provider == ProviderName.COPILOT:
-            from usage_tui.providers.copilot import CopilotCredentialStore
+        if provider == ProviderName.ZAI:
+            # Accept the CN key as a fallback for the same provider.
+            if token := os.environ.get("ZHIPU_API_KEY"):
+                return token
+            if token := load_env_file().get("ZHIPU_API_KEY"):
+                return token
 
-            store = CopilotCredentialStore()
-            return store.load_token()
+            # Finally, reuse whatever ZCode / OpenCode / Claude Code already has.
+            from ai_usage.providers.zai import ZaiCredentialStore
+
+            found = ZaiCredentialStore().load()
+            return found[0] if found else None
 
         return None
 
@@ -156,20 +169,18 @@ class Config:
         Delegates to provider's is_configured() method for accurate detection.
         """
         # Import providers lazily to avoid circular imports
-        from usage_tui.providers import (
+        from ai_usage.providers import (
             ClaudeOAuthProvider,
-            OpenAIUsageProvider,
             OpenRouterUsageProvider,
-            CopilotProvider,
             CodexProvider,
+            ZaiProvider,
         )
 
         provider_map = {
             ProviderName.CLAUDE: ClaudeOAuthProvider,
-            ProviderName.OPENAI: OpenAIUsageProvider,
             ProviderName.OPENROUTER: OpenRouterUsageProvider,
-            ProviderName.COPILOT: CopilotProvider,
             ProviderName.CODEX: CodexProvider,
+            ProviderName.ZAI: ZaiProvider,
         }
 
         provider_class = provider_map.get(provider)

@@ -21,16 +21,15 @@ from textual.widgets import (
     TabPane,
 )
 
-from usage_tui.cache import ResultCache
-from usage_tui.config import config
-from usage_tui.providers import (
+from ai_usage.cache import ResultCache
+from ai_usage.config import config
+from ai_usage.providers import (
     ClaudeOAuthProvider,
     CodexProvider,
-    CopilotProvider,
-    OpenAIUsageProvider,
     OpenRouterUsageProvider,
+    ZaiProvider,
 )
-from usage_tui.providers.base import (
+from ai_usage.providers.base import (
     BaseProvider,
     ProviderName,
     ProviderResult,
@@ -136,8 +135,8 @@ class ProviderCard(Static):
             return
 
         yield Label("Loading...", id="status-line", classes="card-subtitle")
-        if self.provider_name == ProviderName.COPILOT:
-            yield Label("Window: 30d only", classes="card-subtitle")
+        if self.provider_name == ProviderName.CODEX:
+            yield Label("Window: weekly only", classes="card-subtitle")
         yield VerticalGroup(id="metrics-container")
 
     def watch_result(self, result: ProviderResult | None) -> None:
@@ -357,7 +356,7 @@ class UsageTUI(App):
         Binding("j", "toggle_json", "Toggle JSON"),
     ]
 
-    TITLE = "Usage Metrics TUI"
+    TITLE = "AI Usage TUI"
 
     window: reactive[WindowPeriod] = reactive(WindowPeriod.DAY_7)
     show_json: reactive[bool] = reactive(False)
@@ -367,10 +366,9 @@ class UsageTUI(App):
         self.cache = ResultCache()
         self.providers: dict[ProviderName, BaseProvider] = {
             ProviderName.CLAUDE: ClaudeOAuthProvider(),
-            ProviderName.OPENAI: OpenAIUsageProvider(),
             ProviderName.OPENROUTER: OpenRouterUsageProvider(),
-            ProviderName.COPILOT: CopilotProvider(),
             ProviderName.CODEX: CodexProvider(),
+            ProviderName.ZAI: ZaiProvider(),
         }
         self.results: dict[ProviderName, ProviderResult | None] = {}
 
@@ -387,10 +385,9 @@ class UsageTUI(App):
                     )
                     yield VerticalScroll(
                         ProviderCard(ProviderName.CLAUDE, id="card-claude"),
-                        ProviderCard(ProviderName.OPENAI, id="card-openai"),
                         ProviderCard(ProviderName.OPENROUTER, id="card-openrouter"),
-                        ProviderCard(ProviderName.COPILOT, id="card-copilot"),
                         ProviderCard(ProviderName.CODEX, id="card-codex"),
+                        ProviderCard(ProviderName.ZAI, id="card-zai"),
                         id="cards-container",
                     )
                 with TabPane("Raw JSON", id="json-tab"):

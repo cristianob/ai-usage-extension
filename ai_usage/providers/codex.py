@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from usage_tui.providers.base import (
+from ai_usage.providers.base import (
     AuthenticationError,
     BaseProvider,
     ProviderError,
@@ -287,7 +287,7 @@ Note: Token is refreshed automatically when needed."""
                 headers = {
                     "Authorization": f"Bearer {self._credentials.access_token}",
                     "Accept": "application/json",
-                    "User-Agent": "usage-tui",
+                    "User-Agent": "ai-usage",
                 }
 
                 # Add account ID if available
@@ -372,9 +372,10 @@ Note: Token is refreshed automatically when needed."""
         # Parse credits
         credits = data.get("credits", {})
         cost = None
-        if balance := credits.get("balance"):
+        if (balance := credits.get("balance")) is not None:
             try:
-                cost = float(balance)
+                # A zero balance is "no credits", not a $0 charge worth showing.
+                cost = float(balance) or None
             except (TypeError, ValueError):
                 pass
 

@@ -3,15 +3,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "usage-tui"
-version = "0.1.1"
-description = "Multi-provider usage metrics TUI for Claude, OpenAI, and GitHub Copilot"
+name = "ai-usage"
+version = "1.0.0"
+description = "Multi-provider usage metrics TUI for Claude, OpenAI, OpenRouter, Codex and Z.ai"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = ["tui", "usage", "metrics", "claude", "openai", "copilot"]
+keywords = ["tui", "usage", "metrics", "claude", "openai", "codex", "zai"]
 authors = [
-    { name = "GnomeCodexBar" }
+    { name = "Cristiano" }
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -39,10 +39,11 @@ dev = [
 ]
 
 [project.scripts]
-usage-tui = "usage_tui.cli:main"
+ai-usage = "ai_usage.cli:main"
+usage-tui = "ai_usage.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["usage_tui"]
+packages = ["ai_usage"]
 
 [tool.ruff]
 line-length = 100

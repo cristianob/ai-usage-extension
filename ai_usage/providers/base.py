@@ -20,10 +20,9 @@ class ProviderName(str, Enum):
     """Supported provider names."""
 
     CLAUDE = "claude"
-    OPENAI = "openai"
-    OPENROUTER = "openrouter"
-    COPILOT = "copilot"
     CODEX = "codex"
+    ZAI = "zai"
+    OPENROUTER = "openrouter"
 
 
 class UsageMetrics(BaseModel):

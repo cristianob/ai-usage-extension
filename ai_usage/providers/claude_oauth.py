@@ -5,8 +5,8 @@ from datetime import datetime
 
 import httpx
 
-from usage_tui.claude_cli_auth import extract_claude_cli_token
-from usage_tui.providers.base import (
+from ai_usage.claude_cli_auth import extract_claude_cli_token
+from ai_usage.providers.base import (
     AuthenticationError,
     BaseProvider,
     ProviderError,
@@ -79,7 +79,7 @@ Note: Token must start with 'sk-ant-' prefix."""
                         "Authorization": f"Bearer {self._token}",
                         "anthropic-beta": "oauth-2025-04-20",
                         "Accept": "application/json",
-                        "User-Agent": "usage-tui",
+                        "User-Agent": "ai-usage",
                     },
                 )
 
