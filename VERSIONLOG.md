@@ -1,5 +1,17 @@
 # Version History
 
+## v2.3.0 (2026-08-06) - Extension version 5
+
+**Fixed**
+- bar fills were computed from `get_width()` in a `notify::width` handler, so a
+  bar could keep a width derived from the track's CSS minimum instead of its
+  final size - every bar came out proportionally short. The bar is now a
+  `St.Widget` subclass that allocates its fill inside `vfunc_allocate`, using
+  the box the track actually received. Measured against a screenshot, all bars
+  are now within 0.5pp of their percentage (sub-pixel rounding on a 182px
+  track). Drops the `notify::width` plumbing, the open-state re-apply pass and
+  the bar registry along with it
+
 ## v2.2.0 (2026-08-06) - Extension version 4
 
 **Added**

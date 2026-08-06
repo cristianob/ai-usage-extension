@@ -196,6 +196,63 @@ function _formatTokens(value) {
     return `${value}`;
 }
 
+/* A quota bar whose fill is sized during allocation.
+ *
+ * Computing the fill from get_width() after the fact is unreliable: the value
+ * read depends on when the callback runs, so a bar could keep a width derived
+ * from the track's CSS minimum instead of its final size. Allocating the fill
+ * inside vfunc_allocate uses the box the track actually got, every time it
+ * changes, with no signals and no stale state. */
+const ProgressBar = GObject.registerClass(
+class ProgressBar extends St.Widget {
+
+    _init() {
+        super._init({
+            style_class: 'ai-usage-progress-bg',
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            layout_manager: new Clutter.FixedLayout(),
+        });
+
+        this._fraction = 0;
+        this._fill = new St.Widget({style_class: 'ai-usage-progress-fill'});
+        this.add_child(this._fill);
+    }
+
+    /* pct is 0-100; anything else empties the bar. */
+    setPercent(pct, fillClass) {
+        let fraction = _isNumber(pct) ? Math.max(0, Math.min(100, pct)) / 100 : 0;
+
+        this._fill.style_class = `ai-usage-progress-fill ${fillClass}`;
+
+        if (fraction !== this._fraction) {
+            this._fraction = fraction;
+            this.queue_relayout();
+        }
+    }
+
+    vfunc_allocate(box) {
+        super.vfunc_allocate(box);
+
+        let width = box.get_width();
+        let height = box.get_height();
+        let filled = Math.round(width * this._fraction);
+
+        /* Keep a small-but-nonzero percentage visible. */
+        if (this._fraction > 0 && filled < 2)
+            filled = 2;
+        if (filled > width)
+            filled = width;
+
+        this._fill.allocate(new Clutter.ActorBox({
+            x1: 0,
+            y1: 0,
+            x2: filled,
+            y2: height,
+        }));
+    }
+});
+
 const UsageIndicator = GObject.registerClass(
 class UsageIndicator extends PanelMenu.Button {
 
@@ -208,7 +265,6 @@ class UsageIndicator extends PanelMenu.Button {
         this._usageData = {};
         this._providerRows = {};
         this._lastUpdated = null;
-        this._bars = [];
         this._settingsMonitor = null;
         this._envMonitor = null;
 
@@ -364,57 +420,6 @@ class UsageIndicator extends PanelMenu.Button {
         this._lastUpdatedItem.label.style_class = 'ai-usage-last-updated';
         this.menu.addMenuItem(this._lastUpdatedItem);
 
-        /* Bar widths depend on the popup's allocation, which only becomes real
-         * once the menu is mapped. Re-apply every fill when it opens. */
-        this.menu.connect('open-state-changed', (_menu, open) => {
-            if (open)
-                this._reapplyAllBarFills();
-        });
-    }
-
-    /* ------------------------------------------------------------------
-     * Progress bars
-     * ------------------------------------------------------------------ */
-
-    /* Store the percentage on the fill actor and keep it in sync with the
-     * background's real width. Reading get_width() once (as an idle callback
-     * used to) races the first allocation, which left bars empty or tiny. */
-    _setBarFraction(barBg, barFill, pct) {
-        barFill._usagePct = _isNumber(pct) ? Math.max(0, Math.min(100, pct)) : null;
-
-        if (!barBg._aiUsageFillBound) {
-            barBg._aiUsageFillBound = true;
-            barBg._aiUsageWidthId = barBg.connect('notify::width', () => {
-                this._applyBarFraction(barBg, barFill);
-            });
-            this._bars.push({barBg, barFill});
-        }
-
-        this._applyBarFraction(barBg, barFill);
-    }
-
-    _applyBarFraction(barBg, barFill) {
-        let pct = barFill._usagePct;
-        if (pct === null || pct === undefined)
-            return;
-
-        let available = barBg.get_width();
-        if (!(available > 0))
-            return;
-
-        let width = Math.round((pct / 100) * available);
-        if (pct > 0 && width < 2)
-            width = 2;  // keep small-but-nonzero usage visible
-        if (width > available)
-            width = available;
-
-        if (barFill.width !== width)
-            barFill.set_width(width);
-    }
-
-    _reapplyAllBarFills() {
-        for (let {barBg, barFill} of this._bars)
-            this._applyBarFraction(barBg, barFill);
     }
 
     /* ------------------------------------------------------------------
@@ -582,15 +587,7 @@ class UsageIndicator extends PanelMenu.Button {
             y_align: Clutter.ActorAlign.CENTER,
         });
 
-        let barBg = new St.BoxLayout({
-            style_class: 'ai-usage-progress-bg',
-            x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
-        });
-
-        let barFill = new St.Widget({
-            style_class: 'ai-usage-progress-fill',
-        });
+        let bar = new ProgressBar();
 
         let pctLabel = new St.Label({
             text: '',
@@ -604,14 +601,13 @@ class UsageIndicator extends PanelMenu.Button {
             visible: false,
         });
 
-        barBg.add_child(barFill);
         row.add_child(label);
-        row.add_child(barBg);
+        row.add_child(bar);
         row.add_child(pctLabel);
         barContainer.add_child(row);
         barContainer.add_child(resetLabel);
 
-        return {container: barContainer, row, barBg, barFill, pctLabel, label, resetLabel};
+        return {container: barContainer, row, bar, pctLabel, label, resetLabel};
     }
 
     _getWindowBar(card, index) {
@@ -653,8 +649,7 @@ class UsageIndicator extends PanelMenu.Button {
             let bar = this._getWindowBar(card, index);
             bar.label.text = win.label || '';
             bar.pctLabel.text = `${win.pct.toFixed(1)}%`;
-            bar.barFill.style_class = `ai-usage-progress-fill ${_getProgressClass(win.pct)}`;
-            this._setBarFraction(bar.barBg, bar.barFill, win.pct);
+            bar.bar.setPercent(win.pct, _getProgressClass(win.pct));
 
             let countdown = _formatCountdown(win.resetAt, win.useDays);
             let details = [countdown, win.detail].filter(t => t);
@@ -905,7 +900,6 @@ class UsageIndicator extends PanelMenu.Button {
         this._applyProviderVisibility();
         this._applyProviderOrder();
         this._updatePanelLabel();
-        this._reapplyAllBarFills();
 
         if (this._lastUpdated) {
             let timeString = this._lastUpdated.toLocaleTimeString('en-US', {
@@ -997,13 +991,6 @@ class UsageIndicator extends PanelMenu.Button {
             }
         }
 
-        for (let {barBg} of this._bars) {
-            if (barBg._aiUsageWidthId) {
-                barBg.disconnect(barBg._aiUsageWidthId);
-                barBg._aiUsageWidthId = null;
-            }
-        }
-        this._bars = [];
 
         super.destroy();
     }
