@@ -1,0 +1,8 @@
+{
+  "uuid": "ai-usage@local",
+  "name": "AI Usage Extension",
+  "description": "Display AI service usage metrics (Claude, Codex, Z.ai, OpenRouter) in the GNOME top panel. Track your quotas, credits and reset windows at a glance.",
+  "version": 4,
+  "shell-version": ["42", "43", "44"],
+  "gettext-domain": "ai-usage"
+}

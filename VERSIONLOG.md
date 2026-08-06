@@ -1,5 +1,24 @@
 # Version History
 
+## v2.1.0 (2026-08-06) - Extension version 4
+
+**Added**
+- GNOME 45-50 support. GNOME 45 replaced the extension module system, so the
+  extension now ships two implementations: `extension/` (ES modules, `Extension`
+  subclass, libadwaita 1.4 `PasswordEntryRow`/`SwitchRow`/`SpinRow`) and
+  `extension_legacy/` (legacy `imports`, `init()`, libadwaita 1.1 rows). A
+  single file cannot satisfy both module systems, so they are separate on
+  purpose and kept line-for-line similar
+- `dev.sh` moved to the repository root and now detects the running shell to
+  install the right variant, with `--legacy` / `--modern` overrides and a
+  `variant` command
+- each variant directory is self-contained, so it can be copied into
+  `~/.local/share/gnome-shell/extensions/ai-usage@local/` by hand
+
+**Changed**
+- both variants log through `console.log` instead of the deprecated `log()`
+- docs rewritten around the dual-variant layout and the shared Python backend
+
 ## v2.0.0 (2026-08-06) - Extension version 4
 
 Renamed and decoupled: the project is now **AI Usage Extension** (uuid

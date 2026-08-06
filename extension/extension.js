@@ -1,10 +1,18 @@
-/* AI Usage Extension - GNOME Shell 42-44 compatible (legacy imports / init()) */
-const { GLib, St, Gio, Clutter, GObject } = imports.gi;
-const Main = imports.ui.main;
-const PanelMenu = imports.ui.panelMenu;
-const PopupMenu = imports.ui.popupMenu;
-const ExtensionUtils = imports.misc.extensionUtils;
-const Me = ExtensionUtils.getCurrentExtension();
+/* AI Usage Extension - GNOME Shell 45+ (ES modules / Extension subclass).
+ *
+ * The GNOME 42-44 build lives in ../extension_legacy/extension.js. GNOME 45
+ * replaced the extension module system, so each shell generation has its own
+ * implementation; behaviour changes must be applied to both. */
+import GLib from 'gi://GLib';
+import St from 'gi://St';
+import Gio from 'gi://Gio';
+import Clutter from 'gi://Clutter';
+import GObject from 'gi://GObject';
+
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const DEFAULT_REFRESH_SECONDS = 300;
 const MIN_REFRESH_SECONDS = 30;
@@ -203,8 +211,10 @@ function _formatTokens(value) {
 const UsageIndicator = GObject.registerClass(
 class UsageIndicator extends PanelMenu.Button {
 
-    _init() {
+    _init(extension) {
         super._init(0.0, 'AI Usage', false);
+
+        this._extension = extension;
 
         this._timeout = null;
         this._usageData = {};
@@ -295,10 +305,10 @@ class UsageIndicator extends PanelMenu.Button {
     _updateProviderBadge() {
         if (!this._providerIcon)
             return;
-        let path = `${Me.path}/icons/${this._panelProvider}.svg`;
+        let path = `${this._extension.path}/icons/${this._panelProvider}.svg`;
         let file = Gio.File.new_for_path(path);
         if (!file.query_exists(null))
-            file = Gio.File.new_for_path(`${Me.path}/icons/claude.svg`);
+            file = Gio.File.new_for_path(`${this._extension.path}/icons/claude.svg`);
         this._providerIcon.gicon = new Gio.FileIcon({file});
     }
 
@@ -354,7 +364,7 @@ class UsageIndicator extends PanelMenu.Button {
 
         let settingsItem = new PopupMenu.PopupMenuItem('Settings & API Keys');
         settingsItem.connect('activate', () => {
-            ExtensionUtils.openPrefs();
+            this._extension.openPreferences();
         });
         this.menu.addMenuItem(settingsItem);
 
@@ -880,7 +890,7 @@ class UsageIndicator extends PanelMenu.Button {
             this._lastUpdated = new Date();
             return true;
         } catch (e) {
-            log(`ai-usage: JSON parse error: ${e.message}`);
+            console.log(`ai-usage: JSON parse error: ${e.message}`);
             this._handleError(`Parse error: ${e.message}`);
             return false;
         }
@@ -981,7 +991,7 @@ class UsageIndicator extends PanelMenu.Button {
     }
 
     _handleError(message) {
-        log(`ai-usage error: ${message}`);
+        console.log(`ai-usage error: ${message}`);
         this._panelLabel.set_text('Err');
         this._lastUpdatedItem.label.set_text(`Error: ${String(message).substring(0, 40)}`);
     }
@@ -1011,13 +1021,10 @@ class UsageIndicator extends PanelMenu.Button {
     }
 });
 
-class AiUsageExtension {
-    constructor() {
-        this._indicator = null;
-    }
+export default class AiUsageExtension extends Extension {
 
     enable() {
-        this._indicator = new UsageIndicator();
+        this._indicator = new UsageIndicator(this);
         Main.panel.addToStatusArea('ai-usage', this._indicator, 0, 'right');
     }
 
@@ -1027,8 +1034,4 @@ class AiUsageExtension {
             this._indicator = null;
         }
     }
-}
-
-function init() {
-    return new AiUsageExtension();
 }
