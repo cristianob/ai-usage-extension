@@ -1,5 +1,14 @@
 # Version History
 
+## v2.5.0 (2026-08-06) - Extension version 5
+
+**Added**
+- `install.sh` now installs the system packages it needs - git, python3 3.10+,
+  python3-venv, python3-pip, pipx - through apt, dnf, pacman, zypper or apk,
+  only the missing ones, printing the command it runs. Skipped with `--no-deps`
+  or `AI_USAGE_SKIP_DEPS`. Without a supported package manager, or without root
+  and sudo, it prints the command for the user and continues instead of aborting
+
 ## v2.4.0 (2026-08-06) - Extension version 5
 
 **Added**

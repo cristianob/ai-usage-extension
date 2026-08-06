@@ -30,10 +30,18 @@ curl -fsSL https://raw.githubusercontent.com/cristianob/ai-usage-extension/main/
 gnome-extensions prefs ai-usage@local
 ```
 
-The installer never prompts, so it is safe to pipe. It puts the checkout in
-`~/.local/share/ai-usage-extension` (re-running it updates), and installs the CLI
-with `pipx` when available, otherwise into a private virtualenv symlinked into
-`~/.local/bin`.
+The installer never prompts, so it is safe to pipe; only `sudo` may ask for a
+password, and only if a system package is actually missing. It puts the checkout
+in `~/.local/share/ai-usage-extension` (re-running it updates), and installs the
+CLI with `pipx` when available, otherwise into a private virtualenv symlinked
+into `~/.local/bin`.
+
+**What it installs.** System packages, through `apt`, `dnf`, `pacman`, `zypper`
+or `apk`: `git`, `python3` (3.10+), `python3-venv`, `python3-pip` and `pipx` —
+only the ones missing, and it prints the command it runs. Python libraries
+(`textual`, `httpx`, `click`, `pydantic`, and `tomli` on 3.10) come with the CLI
+itself. Without a supported package manager, or without root and `sudo`, it
+prints the exact command for you to run and carries on.
 
 ### Installer options
 
@@ -41,6 +49,7 @@ with `pipx` when available, otherwise into a private virtualenv symlinked into
 # read it first if you would rather not pipe a script into bash
 curl -fsSL .../install.sh -o install.sh && less install.sh && bash install.sh
 
+bash install.sh --no-deps       # never touch system packages
 bash install.sh --legacy        # force the GNOME 42-44 build
 bash install.sh --modern        # force the GNOME 45+ build
 bash install.sh --no-cli        # extension only
@@ -224,6 +233,10 @@ pip install -e '.[dev]'
 ruff check .
 mypy ai_usage
 ```
+
+Python 3.10 needs the `tomli` backport for the Kimi CLI's TOML config; 3.11+ uses
+the standard library's `tomllib`. Both are handled by the dependency list, and if
+neither is importable the TOML credential source is skipped rather than failing.
 
 Adding a provider means a class in `ai_usage/providers/` registered in
 `providers/__init__.py`, `config.py` and `cli.py`, then its name added to

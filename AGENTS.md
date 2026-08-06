@@ -17,7 +17,9 @@ Layout
   reload / prefs / logs.
 - `install.sh` - end-user installer, curl-pipeable. Must stay non-interactive
   (no `read`), idempotent, and work both from a clone and from a fresh clone it
-  makes itself.
+  makes itself. It installs missing system packages (git, python3 3.10+, venv,
+  pip, pipx) via apt/dnf/pacman/zypper/apk; every failure path - no package
+  manager, no sudo, install refused - has to warn and continue, never abort.
 
 Extension rules
 - The two variants are separate implementations because GNOME 45 changed the
@@ -46,7 +48,7 @@ Manual smoke checks
 - ai-usage refresh --provider all
 - ./token_refresh.sh once
 - ./dev.sh variant && ./dev.sh install && ./dev.sh reload && ./dev.sh prefs
-- ./install.sh --help && ./install.sh --no-cli
+- ./install.sh --help && ./install.sh --no-cli && ./install.sh --no-deps
 - bash <(curl -fsSL .../install.sh) --dir /tmp/probe --no-cli   (clone path)
 
 Syntax checks without a shell restart

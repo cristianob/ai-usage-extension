@@ -4,11 +4,17 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/cristianob/ai-usage-extension/main/install.sh | bash
 #
-# Installs the ai-usage CLI and the GNOME extension variant matching the running
-# shell. Runs unattended: it never prompts, so it is safe to pipe into bash.
+# Installs the system packages it needs, the ai-usage CLI and the GNOME extension
+# variant matching the running shell. The script itself never prompts, so it is
+# safe to pipe into bash; only sudo may ask for a password, and only when a
+# package is actually missing.
+#
+# System packages: git, python3 (3.10+), python3-venv, python3-pip, pipx.
+# Python libraries (textual, httpx, click, pydantic, tomli) come with the CLI.
 #
 # Options (also accepted as environment variables):
 #   --legacy | --modern       force an extension variant (AI_USAGE_VARIANT)
+#   --no-deps                 do not install system packages (AI_USAGE_SKIP_DEPS)
 #   --no-cli                  skip the Python CLI
 #   --no-extension            skip the GNOME extension
 #   --ref <git-ref>           branch or tag to install (AI_USAGE_REF, default main)
@@ -30,7 +36,10 @@ EXT_DIR="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
 
 WANT_CLI=1
 WANT_EXTENSION=1
+WANT_DEPS=1
 UNINSTALL=0
+
+[[ -n "${AI_USAGE_SKIP_DEPS:-}" ]] && WANT_DEPS=0
 
 # ---------------------------------------------------------------- output ----
 
@@ -56,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --legacy)       VARIANT="extension_legacy" ;;
         --modern)       VARIANT="extension" ;;
+        --no-deps)      WANT_DEPS=0 ;;
         --no-cli)       WANT_CLI=0 ;;
         --no-extension) WANT_EXTENSION=0 ;;
         --uninstall)    UNINSTALL=1 ;;
@@ -95,6 +105,146 @@ if [[ "$UNINSTALL" == 1 ]]; then
     note "Kept ~/.config/ai-usage (keys and settings)"
     exit 0
 fi
+
+# ------------------------------------------------------------------ deps ----
+
+# Package names differ per distro; the keys are what this script needs.
+deps_packages() {
+    local manager="$1" need="$2" out=()
+
+    for item in $need; do
+        case "$manager:$item" in
+            apt:git|dnf:git|pacman:git|zypper:git|apk:git) out+=(git) ;;
+
+            apt:python)     out+=(python3) ;;
+            dnf:python)     out+=(python3) ;;
+            pacman:python)  out+=(python) ;;
+            zypper:python)  out+=(python3) ;;
+            apk:python)     out+=(python3) ;;
+
+            apt:venv)       out+=(python3-venv) ;;
+            dnf:venv)       out+=(python3) ;;
+            pacman:venv)    out+=(python) ;;
+            zypper:venv)    out+=(python3-venv) ;;
+            apk:venv)       out+=(python3) ;;
+
+            apt:pip)        out+=(python3-pip) ;;
+            dnf:pip)        out+=(python3-pip) ;;
+            pacman:pip)     out+=(python-pip) ;;
+            zypper:pip)     out+=(python3-pip) ;;
+            apk:pip)        out+=(py3-pip) ;;
+
+            apt:pipx)       out+=(pipx) ;;
+            dnf:pipx)       out+=(pipx) ;;
+            pacman:pipx)    out+=(python-pipx) ;;
+            zypper:pipx)    out+=(python3-pipx) ;;
+            apk:pipx)       out+=(pipx) ;;
+        esac
+    done
+
+    printf '%s\n' "${out[@]:-}" | sort -u | tr '\n' ' '
+}
+
+package_manager() {
+    for manager in apt-get dnf pacman zypper apk; do
+        if have "$manager"; then
+            case "$manager" in
+                apt-get) echo apt ;;
+                *)       echo "$manager" ;;
+            esac
+            return
+        fi
+    done
+    echo ""
+}
+
+install_command() {
+    local manager="$1"; shift
+    case "$manager" in
+        apt)    echo "apt-get install -y $*" ;;
+        dnf)    echo "dnf install -y $*" ;;
+        pacman) echo "pacman -S --needed --noconfirm $*" ;;
+        zypper) echo "zypper install -y $*" ;;
+        apk)    echo "apk add $*" ;;
+    esac
+}
+
+python_at_least_310() {
+    have python3 || return 1
+    python3 - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+}
+
+missing_deps() {
+    local need=()
+
+    have git || need+=(git)
+    python_at_least_310 || need+=(python)
+
+    if have python3; then
+        python3 -c 'import venv' >/dev/null 2>&1 || need+=(venv)
+        python3 -c 'import ensurepip' >/dev/null 2>&1 || need+=(pip)
+    fi
+
+    have pipx || need+=(pipx)
+
+    printf '%s ' "${need[@]:-}"
+}
+
+install_deps() {
+    step "Checking system packages"
+
+    local need
+    need="$(missing_deps)"
+    need="${need% }"
+
+    if [[ -z "${need// /}" ]]; then
+        ok "git, python3 3.10+, venv, pip and pipx are present"
+        return
+    fi
+
+    info "missing: $need"
+
+    local manager
+    manager="$(package_manager)"
+    if [[ -z "$manager" ]]; then
+        warn "no supported package manager found (apt, dnf, pacman, zypper, apk)"
+        warn "install these yourself: $need"
+        return
+    fi
+
+    local packages command
+    packages="$(deps_packages "$manager" "$need")"
+    packages="${packages% }"
+    command="$(install_command "$manager" "$packages")"
+
+    if [[ "$(id -u)" == "0" ]]; then
+        info "$command"
+        # shellcheck disable=SC2086
+        $command || warn "package install failed - continuing"
+    elif have sudo; then
+        info "sudo $command"
+        note "sudo may ask for your password"
+        # shellcheck disable=SC2086
+        sudo $command || warn "package install failed - continuing"
+    else
+        warn "not root and sudo is unavailable; run this yourself:"
+        warn "  $command"
+        return
+    fi
+
+    need="$(missing_deps)"
+    if [[ -z "${need// /}" ]]; then
+        ok "system packages ready"
+    else
+        warn "still missing: $need"
+    fi
+}
+
+# git is needed to fetch the sources, so this runs first.
+[[ "$WANT_DEPS" == 1 ]] && install_deps
 
 # ---------------------------------------------------------------- source ----
 
