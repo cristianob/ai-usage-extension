@@ -10,24 +10,13 @@ from ai_usage.providers.base import ProviderName
 # Env file location
 ENV_FILE_PATH = Path.home() / ".config" / "ai-usage" / "env"
 
-# Pre-rename location, still read when the current one is absent
-LEGACY_ENV_FILE_PATH = Path.home() / ".config" / "usage-tui" / "env"
-
-
-def env_file_path() -> Path:
-    """Path the env file is read from (new location wins, legacy as fallback)."""
-    if ENV_FILE_PATH.exists() or not LEGACY_ENV_FILE_PATH.exists():
-        return ENV_FILE_PATH
-    return LEGACY_ENV_FILE_PATH
-
 
 def load_env_file() -> dict[str, str]:
     """Load key=value pairs from env file. Returns empty dict if missing/unreadable."""
     result: dict[str, str] = {}
-    path = env_file_path()
     try:
-        if path.exists():
-            for line in path.read_text().splitlines():
+        if ENV_FILE_PATH.exists():
+            for line in ENV_FILE_PATH.read_text().splitlines():
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     key, _, value = line.partition("=")
@@ -44,10 +33,9 @@ def write_env_file(updates: dict[str, str]) -> None:
     existing_lines: list[str] = []
     existing_keys: set[str] = set()
 
-    source = env_file_path()
     try:
-        if source.exists():
-            existing_lines = source.read_text().splitlines()
+        if ENV_FILE_PATH.exists():
+            existing_lines = ENV_FILE_PATH.read_text().splitlines()
     except (OSError, PermissionError):
         pass
 

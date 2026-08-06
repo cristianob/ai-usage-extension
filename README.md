@@ -45,8 +45,6 @@ ai-usage show --json # what the extension consumes
 ai-usage tui         # full TUI
 ```
 
-`usage-tui` stays as an alias for `ai-usage` so older launchers keep working.
-
 ---
 
 ## Supported providers
@@ -152,9 +150,6 @@ Each directory is self-contained (`extension.js`, `prefs.js`, `metadata.json`,
 | `~/.config/ai-usage/env` | provider keys, `KEY=value` lines, mode 600 |
 | `~/.config/ai-usage/extension.json` | pinned provider, panel window, provider order and visibility, refresh interval |
 | `~/.cache/ai-usage/` | cached provider results |
-
-The pre-rename `~/.config/usage-tui/` locations are still read when the new ones
-do not exist; the first write lands in the new path.
 
 ---
 

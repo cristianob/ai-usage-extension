@@ -31,13 +31,7 @@ log() {
 }
 
 cli() {
-    if command -v ai-usage >/dev/null 2>&1; then
-        echo "ai-usage"
-    elif command -v usage-tui >/dev/null 2>&1; then
-        echo "usage-tui"
-    else
-        echo ""
-    fi
+    command -v ai-usage 2>/dev/null || echo ""
 }
 
 # Claude's credentials belong to the Claude CLI: touching /usage makes it renew

@@ -3,7 +3,8 @@ Focus: rules for usage and testing of features.
 
 Project identity
 - Local, decoupled fork of GnomeCodexBar. Do not add an upstream remote.
-- CLI/TUI is "AI Usage TUI" (`ai-usage`, package `ai_usage`).
+- CLI/TUI is "AI Usage TUI" (`ai-usage`, package `ai_usage`). There is no
+  compatibility path for the old `usage-tui` name: one binary, one config dir.
 - GNOME extension is "AI Usage Extension" (uuid `ai-usage@local`).
 
 Layout

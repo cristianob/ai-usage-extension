@@ -1,5 +1,13 @@
 # Version History
 
+## v2.2.0 (2026-08-06) - Extension version 4
+
+**Removed**
+- every `usage-tui` compatibility path. The alias console script is gone (only
+  `ai-usage` remains), the extension and its preferences no longer look for a
+  `usage-tui` binary, a `USAGE_TUI_PATH` override, or config under
+  `~/.config/usage-tui/`, and that directory has been deleted after migration
+
 ## v2.1.0 (2026-08-06) - Extension version 4
 
 **Added**
@@ -84,7 +92,7 @@ The upstream remote was removed; this repository is local-only.
 
 ---
 
-## usage-tui Python Package Versions
+## Python Package Versions (released as `usage-tui` before v2.0.0)
 
 ### v0.1.1 (2026-02-15)
 **Fixed**
@@ -104,5 +112,6 @@ The upstream remote was removed; this repository is local-only.
 
 ## Version Numbering
 
-- **Extension**: Uses semantic versioning for git tags (v1.0.1) but integer versions in metadata.json (3) per GNOME requirements
-- **usage-tui**: Uses semantic versioning (0.1.1)
+- **Extension**: semantic versioning for git tags, integer versions in metadata.json
+  per GNOME requirements; both variants carry the same integer
+- **ai-usage** (Python package): semantic versioning

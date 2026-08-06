@@ -15,11 +15,7 @@ const CONFIG_DIR = GLib.get_home_dir() + '/.config/ai-usage';
 const ENV_FILE_PATH = CONFIG_DIR + '/env';
 const SETTINGS_PATH = CONFIG_DIR + '/extension.json';
 
-const LEGACY_CONFIG_DIR = GLib.get_home_dir() + '/.config/usage-tui';
-const LEGACY_ENV_FILE_PATH = LEGACY_CONFIG_DIR + '/env';
-const LEGACY_SETTINGS_PATH = LEGACY_CONFIG_DIR + '/extension.json';
-
-const CLI_CANDIDATES = ['ai-usage', 'usage-tui'];
+const CLI_NAME = 'ai-usage';
 
 const PROVIDERS = ['claude', 'codex', 'zai', 'openrouter'];
 
@@ -102,9 +98,7 @@ function parseEnvText(text) {
 }
 
 function loadEnv() {
-    let text = readTextFile(ENV_FILE_PATH);
-    if (text === null)
-        text = readTextFile(LEGACY_ENV_FILE_PATH);
+    const text = readTextFile(ENV_FILE_PATH);
     return text ? parseEnvText(text) : {};
 }
 
@@ -112,9 +106,7 @@ function loadEnv() {
 function saveEnv(updates) {
     GLib.mkdir_with_parents(CONFIG_DIR, 0o755);
 
-    let text = readTextFile(ENV_FILE_PATH);
-    if (text === null)
-        text = readTextFile(LEGACY_ENV_FILE_PATH) || '';
+    const text = readTextFile(ENV_FILE_PATH) || '';
 
     const written = new Set();
     const output = [];
@@ -156,7 +148,7 @@ function saveEnv(updates) {
 }
 
 function loadSettings() {
-    const text = readTextFile(SETTINGS_PATH) || readTextFile(LEGACY_SETTINGS_PATH);
+    const text = readTextFile(SETTINGS_PATH);
     if (!text)
         return {};
     try {
@@ -189,12 +181,7 @@ function sanitizeOrder(value) {
 }
 
 function cliPath() {
-    for (const candidate of CLI_CANDIDATES) {
-        const found = GLib.find_program_in_path(candidate);
-        if (found)
-            return found;
-    }
-    return null;
+    return GLib.find_program_in_path(CLI_NAME);
 }
 
 function openTerminal(command) {
@@ -518,11 +505,11 @@ export default class AiUsagePreferences extends ExtensionPreferences {
 
         group.add(this._buildCommandRow(window, 'Check connectivity',
             'Runs the doctor command for every provider',
-            'Run doctor', `${cli || CLI_CANDIDATES[0]} doctor`));
+            'Run doctor', `${cli || CLI_NAME} doctor`));
 
         group.add(this._buildCommandRow(window, 'Open the TUI',
             'Full AI Usage TUI in a terminal',
-            'Open', `${cli || CLI_CANDIDATES[0]} tui`));
+            'Open', `${cli || CLI_NAME} tui`));
 
         return group;
     }
