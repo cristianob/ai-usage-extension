@@ -13,7 +13,11 @@ Layout
   libadwaita 1.4 rows.
 - `extension_legacy/` - GNOME 42-44 build: legacy `imports`, `init()`,
   libadwaita 1.1 rows.
-- `dev.sh` - installs the variant matching the running shell.
+- `dev.sh` - developer helper: installs the variant matching the running shell,
+  reload / prefs / logs.
+- `install.sh` - end-user installer, curl-pipeable. Must stay non-interactive
+  (no `read`), idempotent, and work both from a clone and from a fresh clone it
+  makes itself.
 
 Extension rules
 - The two variants are separate implementations because GNOME 45 changed the
@@ -41,6 +45,8 @@ Manual smoke checks
 - ai-usage refresh --provider all
 - ./token_refresh.sh once
 - ./dev.sh variant && ./dev.sh install && ./dev.sh reload && ./dev.sh prefs
+- ./install.sh --help && ./install.sh --no-cli
+- bash <(curl -fsSL .../install.sh) --dir /tmp/probe --no-cli   (clone path)
 
 Syntax checks without a shell restart
 - legacy: `node --check extension_legacy/extension.js` (and prefs.js)

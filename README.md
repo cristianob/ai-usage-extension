@@ -16,27 +16,54 @@ This is a decoupled fork of GnomeCodexBar, maintained independently.
 
 ---
 
-## Quick start
+## Install
 
 ```bash
-git clone git@github.com:cristianob/ai-usage-extension.git
-cd ai-usage-extension
-
-# 1. the CLI (pipx recommended)
-pipx install --force .
-
-# 2. the extension - detects your GNOME version
-./dev.sh install
-./dev.sh enable
-
-# 3. keys, in a graphical window
-./dev.sh prefs
+curl -fsSL https://raw.githubusercontent.com/cristianob/ai-usage-extension/main/install.sh | bash
 ```
 
-After installing the extension: on GNOME 42–44 (X11) press **Alt+F2**, type
-**`r`**, Enter. On Wayland or GNOME 45+, log out and back in.
+That installs the `ai-usage` CLI and the extension variant matching your GNOME
+version. It never prompts, so it is safe to pipe. Options:
 
-Check the backend from a terminal:
+```bash
+# read it first if you would rather not pipe a script into bash
+curl -fsSL .../install.sh -o install.sh && less install.sh && bash install.sh
+
+bash install.sh --legacy        # force the GNOME 42-44 build
+bash install.sh --modern        # force the GNOME 45+ build
+bash install.sh --no-cli        # extension only
+bash install.sh --no-extension  # CLI only
+bash install.sh --ref <tag>     # a specific tag or branch
+bash install.sh --uninstall     # remove everything except ~/.config/ai-usage
+```
+
+The checkout lands in `~/.local/share/ai-usage-extension`; re-running the
+installer updates it. The CLI goes through `pipx` when available, otherwise into
+a private virtualenv symlinked into `~/.local/bin`.
+
+<details>
+<summary>From a clone instead</summary>
+
+```bash
+git clone https://github.com/cristianob/ai-usage-extension.git
+cd ai-usage-extension
+./install.sh            # same script, uses this checkout, no network needed
+# or, piecemeal:
+pipx install --force .  # the CLI
+./dev.sh install        # the extension, variant auto-detected
+./dev.sh enable
+```
+</details>
+
+Then load the extension: on GNOME 42–44 under X11 press **Alt+F2**, type **`r`**,
+Enter. On Wayland or GNOME 45+, log out and back in. Finally open the
+preferences to add your keys:
+
+```bash
+gnome-extensions prefs ai-usage@local
+```
+
+### Check the backend from a terminal
 
 ```bash
 ai-usage doctor      # per-provider config + connectivity

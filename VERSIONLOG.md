@@ -2,6 +2,12 @@
 
 ## v2.2.0 (2026-08-06) - Extension version 4
 
+**Added**
+- `install.sh`, curl-pipeable: installs the CLI and the extension variant
+  matching the running shell, reuses the surrounding checkout when run from a
+  clone, and has `--legacy` / `--modern` / `--no-cli` / `--no-extension` /
+  `--ref` / `--dir` / `--uninstall`
+
 **Removed**
 - every `usage-tui` compatibility path. The alias console script is gone (only
   `ai-usage` remains), the extension and its preferences no longer look for a
