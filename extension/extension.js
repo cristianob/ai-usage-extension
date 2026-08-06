@@ -1,139 +1,311 @@
-import GLib from 'gi://GLib';
-import St from 'gi://St';
-import Gio from 'gi://Gio';
-import Clutter from 'gi://Clutter';
-import GObject from 'gi://GObject';
+/* AI Usage Extension - GNOME Shell 42-44 compatible (legacy imports / init()) */
+const { GLib, St, Gio, Clutter, GObject } = imports.gi;
+const Main = imports.ui.main;
+const PanelMenu = imports.ui.panelMenu;
+const PopupMenu = imports.ui.popupMenu;
+const ExtensionUtils = imports.misc.extensionUtils;
+const Me = ExtensionUtils.getCurrentExtension();
 
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
-import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+const DEFAULT_REFRESH_SECONDS = 300;
+const MIN_REFRESH_SECONDS = 30;
 
-const REFRESH_INTERVAL_SECONDS = 300;
-const ENV_FILE_PATH = GLib.get_home_dir() + '/.config/usage-tui/env';
+const CONFIG_DIR = GLib.get_home_dir() + '/.config/ai-usage';
+const ENV_FILE_PATH = CONFIG_DIR + '/env';
+const SETTINGS_PATH = CONFIG_DIR + '/extension.json';
 
-/**
- * Resolve the usage-tui binary path.
- * Checks PATH first, then USAGE_TUI_PATH from the env file.
- */
-function _getUsageTuiPath() {
-    let found = GLib.find_program_in_path('usage-tui');
-    if (found)
-        return found;
+/* Pre-rename locations, still read when the new ones are absent. */
+const LEGACY_CONFIG_DIR = GLib.get_home_dir() + '/.config/usage-tui';
+const LEGACY_ENV_FILE_PATH = LEGACY_CONFIG_DIR + '/env';
+const LEGACY_SETTINGS_PATH = LEGACY_CONFIG_DIR + '/extension.json';
 
-    let env = _loadEnvFromFile();
-    if (env.USAGE_TUI_PATH)
-        return env.USAGE_TUI_PATH;
+const CLI_CANDIDATES = ['ai-usage', 'usage-tui'];
+const CLI_PATH_ENV_VARS = ['AI_USAGE_PATH', 'USAGE_TUI_PATH'];
 
-    return 'usage-tui';
+const PROVIDER_ORDER = ['claude', 'codex', 'zai', 'openrouter'];
+
+/* Providers whose quota is expressed as a percentage, not as money/credits. */
+const PERCENT_QUOTA_PROVIDERS = ['claude', 'codex', 'zai'];
+
+/* Providers measured in money: the panel shows the amount, not a percentage. */
+const MONEY_PROVIDERS = ['openrouter'];
+
+/* What the panel shows for a percentage-based provider. */
+const PANEL_WINDOW_MODES = ['5h', '7d', 'both'];
+const DEFAULT_PANEL_WINDOWS = 'both';
+
+function _readTextFile(path) {
+    try {
+        let [ok, contents] = GLib.file_get_contents(path);
+        if (!ok || !contents)
+            return null;
+        return (contents instanceof Uint8Array)
+            ? new TextDecoder('utf-8').decode(contents)
+            : contents.toString();
+    } catch (_e) {
+        return null;
+    }
 }
 
-function _loadEnvFromFile() {
+function _loadSettings() {
+    let text = _readTextFile(SETTINGS_PATH) || _readTextFile(LEGACY_SETTINGS_PATH);
+    if (!text)
+        return {};
+    try {
+        return JSON.parse(text) || {};
+    } catch (_e) {
+        return {};
+    }
+}
+
+function _saveSettings(settings) {
+    try {
+        GLib.mkdir_with_parents(CONFIG_DIR, 0o755);
+        GLib.file_set_contents(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+    } catch (_e) {}
+}
+
+function _parseEnvText(text) {
     let env = {};
 
-    try {
-        let [ok, contents] = GLib.file_get_contents(ENV_FILE_PATH);
-        if (!ok || !contents)
-            return env;
+    for (let line of text.split('\n')) {
+        let trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#'))
+            continue;
 
-        let text;
-        if (contents instanceof Uint8Array)
-            text = new TextDecoder('utf-8').decode(contents);
-        else
-            text = contents.toString();
-
-        let lines = text.split('\n');
-
-        for (let line of lines) {
-            let trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#'))
-                continue;
-
-            let hashIndex = trimmed.indexOf('#');
-            if (hashIndex !== -1) {
-                let beforeHash = trimmed.slice(0, hashIndex);
-                let singleQuotes = (beforeHash.match(/'/g) || []).length;
-                let doubleQuotes = (beforeHash.match(/"/g) || []).length;
-                if (singleQuotes % 2 === 0 && doubleQuotes % 2 === 0)
-                    trimmed = beforeHash.trim();
-            }
-
-            let match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-            if (!match)
-                continue;
-
-            let name = match[1];
-            let value = match[2].trim();
-
-            if (value.endsWith(';'))
-                value = value.slice(0, -1).trim();
-
-            if ((value.startsWith('"') && value.endsWith('"')) ||
-                (value.startsWith("'") && value.endsWith("'")))
-                value = value.slice(1, -1);
-
-            if (value)
-                env[name] = value;
+        let hashIndex = trimmed.indexOf('#');
+        if (hashIndex !== -1) {
+            let beforeHash = trimmed.slice(0, hashIndex);
+            let singleQuotes = (beforeHash.match(/'/g) || []).length;
+            let doubleQuotes = (beforeHash.match(/"/g) || []).length;
+            if (singleQuotes % 2 === 0 && doubleQuotes % 2 === 0)
+                trimmed = beforeHash.trim();
         }
-    } catch (_e) {
-        return env;
+
+        let match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+        if (!match)
+            continue;
+
+        let name = match[1];
+        let value = match[2].trim();
+
+        if (value.endsWith(';'))
+            value = value.slice(0, -1).trim();
+
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'")))
+            value = value.slice(1, -1);
+
+        if (value)
+            env[name] = value;
     }
 
     return env;
 }
 
-function _getProgressClass(pct) {
-    if (pct < 50)
-        return 'usage-tui-progress-ok';
-    if (pct < 80)
-        return 'usage-tui-progress-warning';
-    return 'usage-tui-progress-danger';
+function _loadEnvFromFile() {
+    let text = _readTextFile(ENV_FILE_PATH) || _readTextFile(LEGACY_ENV_FILE_PATH);
+    return text ? _parseEnvText(text) : {};
 }
 
-const UsageTuiIndicator = GObject.registerClass(
-class UsageTuiIndicator extends PanelMenu.Button {
+function _getCliPath() {
+    for (let candidate of CLI_CANDIDATES) {
+        let found = GLib.find_program_in_path(candidate);
+        if (found)
+            return found;
+    }
+
+    let env = _loadEnvFromFile();
+    for (let name of CLI_PATH_ENV_VARS) {
+        if (env[name])
+            return env[name];
+    }
+
+    return CLI_CANDIDATES[0];
+}
+
+function _getProgressClass(pct) {
+    if (pct < 50)
+        return 'ai-usage-progress-ok';
+    if (pct < 80)
+        return 'ai-usage-progress-warning';
+    return 'ai-usage-progress-danger';
+}
+
+function _isNumber(value) {
+    return typeof value === 'number' && !Number.isNaN(value);
+}
+
+/* Turn a rate-limit window length in seconds into a short label. */
+function _windowLabelFromSeconds(seconds) {
+    if (!_isNumber(seconds) || seconds <= 0)
+        return null;
+    if (seconds % 604800 === 0) {
+        let weeks = seconds / 604800;
+        return weeks === 1 ? '7d' : `${weeks * 7}d`;
+    }
+    if (seconds % 86400 === 0)
+        return `${seconds / 86400}d`;
+    if (seconds % 3600 === 0)
+        return `${seconds / 3600}h`;
+    return `${Math.round(seconds / 60)}m`;
+}
+
+/* OpenRouter describes its spend window with a word, not a duration. */
+function _windowLabelFromReset(reset) {
+    switch (String(reset || '').toLowerCase()) {
+    case 'daily':
+        return '1d';
+    case 'weekly':
+        return '7d';
+    case 'monthly':
+        return '30d';
+    default:
+        return null;
+    }
+}
+
+function _formatCountdown(resetTime, useDays) {
+    if (resetTime === null || resetTime === undefined)
+        return null;
+
+    let resetDate = _isNumber(resetTime)
+        ? new Date(resetTime * 1000)
+        : new Date(resetTime);
+
+    if (Number.isNaN(resetDate.getTime()))
+        return null;
+
+    let diffMs = resetDate - new Date();
+    if (diffMs <= 0)
+        return null;
+
+    let days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    let hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    let mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
+    if (useDays && days > 0)
+        return `Resets in ${days}d ${hours}h ${mins}m`;
+    return `Resets in ${days * 24 + hours}h ${mins}m`;
+}
+
+function _formatTokens(value) {
+    if (!_isNumber(value))
+        return null;
+    if (value >= 1e9)
+        return `${(value / 1e9).toFixed(2)}B`;
+    if (value >= 1e6)
+        return `${(value / 1e6).toFixed(1)}M`;
+    if (value >= 1e3)
+        return `${Math.round(value / 1e3)}k`;
+    return `${value}`;
+}
+
+const UsageIndicator = GObject.registerClass(
+class UsageIndicator extends PanelMenu.Button {
 
     _init() {
-        super._init(0.0, 'usage-tui Monitor', false);
+        super._init(0.0, 'AI Usage', false);
 
         this._timeout = null;
         this._usageData = {};
         this._providerRows = {};
-        this._providerTabs = {};
         this._lastUpdated = null;
-        this._activeProvider = null;
-        this._providerOrder = ['claude', 'openrouter', 'copilot', 'codex'];
+        this._bars = [];
+        this._settingsMonitor = null;
+        this._envMonitor = null;
+
+        this._settings = _loadSettings();
+        this._panelProvider = this._settings.panelProvider || 'claude';
+        this._panelWindows = this._sanitizePanelWindows(this._settings.panelWindows);
+        this._providerOrder = this._sanitizeProviderOrder(this._settings.providerOrder);
+        this._visibleProviders = this._sanitizeVisibleProviders(this._settings.visibleProviders);
+        this._refreshSeconds = this._sanitizeRefreshSeconds(this._settings.refreshSeconds);
 
         this._buildPanelButton();
         this._buildPopupMenu();
+        this._watchConfigFiles();
         this._refreshData();
         this._startAutoRefresh();
     }
 
+    _sanitizePanelWindows(value) {
+        return PANEL_WINDOW_MODES.includes(value) ? value : DEFAULT_PANEL_WINDOWS;
+    }
+
+    /* Card order. Unknown names are dropped and any provider the setting forgot
+     * is appended in the built-in order, so a stale list never hides a card. */
+    _sanitizeProviderOrder(value) {
+        if (!Array.isArray(value))
+            return PROVIDER_ORDER.slice();
+
+        let ordered = value.filter((name, index) =>
+            PROVIDER_ORDER.includes(name) && value.indexOf(name) === index);
+
+        for (let name of PROVIDER_ORDER) {
+            if (!ordered.includes(name))
+                ordered.push(name);
+        }
+
+        return ordered;
+    }
+
+    /* Which providers get a card in the popup. Anything unrecognized is dropped;
+     * a missing setting means "all of them". An explicit empty list is honoured. */
+    _sanitizeVisibleProviders(value) {
+        if (!Array.isArray(value))
+            return PROVIDER_ORDER.slice();
+        return value.filter(name => PROVIDER_ORDER.includes(name));
+    }
+
+    _isProviderVisible(providerName) {
+        return this._visibleProviders.includes(providerName);
+    }
+
+    _sanitizeRefreshSeconds(value) {
+        if (!_isNumber(value))
+            return DEFAULT_REFRESH_SECONDS;
+        return Math.max(MIN_REFRESH_SECONDS, Math.round(value));
+    }
+
     _buildPanelButton() {
+        this.add_style_class_name('ai-usage-button');
+
         this._panelBox = new St.BoxLayout({
             style_class: 'panel-status-menu-box',
         });
 
-        this._icon = new St.Icon({
-            icon_name: 'utilities-system-monitor-symbolic',
-            style_class: 'system-status-icon',
+        this._providerIcon = new St.Icon({
+            style_class: 'ai-usage-provider-icon',
+            icon_size: 16,
+            y_align: Clutter.ActorAlign.CENTER,
         });
+        this._updateProviderBadge();
 
         this._panelLabel = new St.Label({
             text: '...',
             y_align: Clutter.ActorAlign.CENTER,
-            style_class: 'usage-tui-panel-label',
+            style_class: 'ai-usage-panel-label',
         });
 
-        this._panelBox.add_child(this._icon);
+        this._panelBox.add_child(this._providerIcon);
         this._panelBox.add_child(this._panelLabel);
         this.add_child(this._panelBox);
+    }
+
+    _updateProviderBadge() {
+        if (!this._providerIcon)
+            return;
+        let path = `${Me.path}/icons/${this._panelProvider}.svg`;
+        let file = Gio.File.new_for_path(path);
+        if (!file.query_exists(null))
+            file = Gio.File.new_for_path(`${Me.path}/icons/claude.svg`);
+        this._providerIcon.gicon = new Gio.FileIcon({file});
     }
 
     _buildPopupMenu() {
         let headerBox = new St.BoxLayout({
             vertical: false,
-            style_class: 'usage-tui-header',
+            style_class: 'ai-usage-header',
         });
 
         let headerIcon = new St.Icon({
@@ -142,8 +314,8 @@ class UsageTuiIndicator extends PanelMenu.Button {
         });
 
         let headerLabel = new St.Label({
-            text: 'usage-tui',
-            style_class: 'usage-tui-header-label',
+            text: 'AI Usage',
+            style_class: 'ai-usage-header-label',
             y_align: Clutter.ActorAlign.CENTER,
         });
 
@@ -151,99 +323,178 @@ class UsageTuiIndicator extends PanelMenu.Button {
         headerBox.add_child(headerLabel);
 
         let headerItem = new PopupMenu.PopupBaseMenuItem({reactive: false});
+        headerItem.add_style_class_name('ai-usage-header-item');
         headerItem.add_child(headerBox);
         this.menu.addMenuItem(headerItem);
 
-        this._tabBar = new St.BoxLayout({
-            vertical: false,
-            style_class: 'usage-tui-tab-bar',
-        });
-
-        let tabBarItem = new PopupMenu.PopupBaseMenuItem({reactive: false});
-        tabBarItem.add_child(this._tabBar);
-        this.menu.addMenuItem(tabBarItem);
-
         let separator1 = new PopupMenu.PopupSeparatorMenuItem();
-        separator1.style_class = 'usage-tui-separator';
+        separator1.style_class = 'ai-usage-separator';
         this.menu.addMenuItem(separator1);
 
         this._providersContainer = new St.BoxLayout({
             vertical: true,
             x_expand: true,
-            style_class: 'usage-tui-providers',
+            x_align: Clutter.ActorAlign.FILL,
+            style_class: 'ai-usage-providers',
         });
 
-        let providersItem = new PopupMenu.PopupBaseMenuItem({reactive: false});
-        providersItem.add_child(this._providersContainer);
-        this.menu.addMenuItem(providersItem);
+        this.menu.box.add_child(this._providersContainer);
 
         let separator2 = new PopupMenu.PopupSeparatorMenuItem();
-        separator2.style_class = 'usage-tui-separator';
+        separator2.style_class = 'ai-usage-separator';
         this.menu.addMenuItem(separator2);
 
+        /* Every display option lives in the preferences window; the popup keeps
+         * only the two actions that make sense in place. */
         let refreshItem = new PopupMenu.PopupMenuItem('Refresh Now');
         refreshItem.connect('activate', () => {
             this._refreshData();
         });
         this.menu.addMenuItem(refreshItem);
 
-        let openTuiItem = new PopupMenu.PopupMenuItem('Open usage-tui TUI');
-        openTuiItem.connect('activate', () => {
-            this._openTerminalWithCommand(`${_getUsageTuiPath()} tui`);
+        let settingsItem = new PopupMenu.PopupMenuItem('Settings & API Keys');
+        settingsItem.connect('activate', () => {
+            ExtensionUtils.openPrefs();
         });
-        this.menu.addMenuItem(openTuiItem);
+        this.menu.addMenuItem(settingsItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._lastUpdatedItem = new PopupMenu.PopupMenuItem('Last updated: Never', {
             reactive: false,
         });
-        this._lastUpdatedItem.label.style_class = 'usage-tui-last-updated';
+        this._lastUpdatedItem.label.style_class = 'ai-usage-last-updated';
         this.menu.addMenuItem(this._lastUpdatedItem);
+
+        /* Bar widths depend on the popup's allocation, which only becomes real
+         * once the menu is mapped. Re-apply every fill when it opens. */
+        this.menu.connect('open-state-changed', (_menu, open) => {
+            if (open)
+                this._reapplyAllBarFills();
+        });
     }
 
-    _createTab(providerName) {
-        let tab = new St.Button({
-            style_class: 'usage-tui-tab',
-            can_focus: true,
-        });
+    /* ------------------------------------------------------------------
+     * Progress bars
+     * ------------------------------------------------------------------ */
 
-        let tabLabel = new St.Label({
-            text: providerName.toUpperCase(),
-            style_class: `usage-tui-tab-label usage-tui-tab-label-${providerName}`,
-        });
+    /* Store the percentage on the fill actor and keep it in sync with the
+     * background's real width. Reading get_width() once (as an idle callback
+     * used to) races the first allocation, which left bars empty or tiny. */
+    _setBarFraction(barBg, barFill, pct) {
+        barFill._usagePct = _isNumber(pct) ? Math.max(0, Math.min(100, pct)) : null;
 
-        tab.set_child(tabLabel);
-        tab.connect('clicked', () => {
-            this._switchToProvider(providerName);
-        });
+        if (!barBg._aiUsageFillBound) {
+            barBg._aiUsageFillBound = true;
+            barBg._aiUsageWidthId = barBg.connect('notify::width', () => {
+                this._applyBarFraction(barBg, barFill);
+            });
+            this._bars.push({barBg, barFill});
+        }
 
-        return {button: tab, label: tabLabel};
+        this._applyBarFraction(barBg, barFill);
     }
 
-    _switchToProvider(providerName) {
-        if (this._activeProvider === providerName)
+    _applyBarFraction(barBg, barFill) {
+        let pct = barFill._usagePct;
+        if (pct === null || pct === undefined)
             return;
 
-        this._activeProvider = providerName;
+        let available = barBg.get_width();
+        if (!(available > 0))
+            return;
 
-        for (let [name, tabData] of Object.entries(this._providerTabs)) {
-            if (name === providerName)
-                tabData.button.style_class = `usage-tui-tab-active usage-tui-tab-active-${name}`;
-            else
-                tabData.button.style_class = 'usage-tui-tab';
+        let width = Math.round((pct / 100) * available);
+        if (pct > 0 && width < 2)
+            width = 2;  // keep small-but-nonzero usage visible
+        if (width > available)
+            width = available;
+
+        if (barFill.width !== width)
+            barFill.set_width(width);
+    }
+
+    _reapplyAllBarFills() {
+        for (let {barBg, barFill} of this._bars)
+            this._applyBarFraction(barBg, barFill);
+    }
+
+    /* ------------------------------------------------------------------
+     * Window extraction
+     * ------------------------------------------------------------------ */
+
+    /* Normalize every provider shape into a list of quota windows:
+     *   {key, label, pct, resetAt, useDays, detail}
+     * Providers no longer need to have a 5h window (Codex is weekly-only),
+     * so labels come from the data instead of from fixed positions. */
+    _extractWindows(providerName, data) {
+        const raw = data.raw || {};
+        const windows = [];
+        const seen = new Set();
+
+        const push = (key, label, pct, resetAt, detail) => {
+            if (!_isNumber(pct) || seen.has(key))
+                return;
+            seen.add(key);
+            windows.push({
+                key,
+                label,
+                pct,
+                resetAt: resetAt === undefined ? null : resetAt,
+                useDays: /d$/.test(label),
+                detail: detail || null,
+            });
+        };
+
+        /* Claude / Z.ai shape: named windows with utilization percentages. */
+        const named = [
+            ['5h', raw.five_hour],
+            ['7d', raw.seven_day],
+            ['30d', raw.thirty_day],
+        ];
+        for (let [key, entry] of named) {
+            if (!entry)
+                continue;
+            push(key, key, entry.utilization, entry.resets_at,
+                this._tokenDetail(entry));
         }
 
-        for (let [name, card] of Object.entries(this._providerRows)) {
-            if (name === providerName) {
-                card.container.show();
-                if (this._usageData[name])
-                    this._populateProviderCard(card, name, this._usageData[name]);
-            } else {
-                card.container.hide();
+        /* Codex shape: rate_limit windows that describe their own length. */
+        const rateLimit = raw.rate_limit || {};
+        for (let windowName of ['primary_window', 'secondary_window']) {
+            let entry = rateLimit[windowName];
+            if (!entry)
+                continue;
+            let label = _windowLabelFromSeconds(entry.limit_window_seconds)
+                || (windowName === 'primary_window' ? '5h' : '7d');
+            push(label, label, entry.used_percent, entry.reset_at);
+        }
+
+        /* Spend-limit shape (OpenRouter): one window named by limit_reset. */
+        if (windows.length === 0) {
+            const metrics = data.metrics || {};
+            let pct = this._usagePercentFromMetrics(metrics);
+            if (_isNumber(pct)) {
+                let label = _windowLabelFromReset((raw.data || {}).limit_reset)
+                    || data.window || '';
+                push(label || 'total', label, pct, metrics.reset_at || null);
             }
         }
+
+        return windows;
     }
+
+    _tokenDetail(entry) {
+        let used = _formatTokens(entry.used_tokens);
+        let total = _formatTokens(entry.total_tokens);
+        if (used && total)
+            return `${used} / ${total} tokens`;
+        return null;
+    }
+
+    /* ------------------------------------------------------------------
+     * Cards
+     * ------------------------------------------------------------------ */
 
     _updateProviderCard(providerName, data) {
         let card = this._providerRows[providerName];
@@ -252,9 +503,6 @@ class UsageTuiIndicator extends PanelMenu.Button {
             card = this._createProviderCard(providerName);
             this._providerRows[providerName] = card;
             this._providersContainer.add_child(card.container);
-
-            if (this._activeProvider && this._activeProvider !== providerName)
-                card.container.hide();
         }
 
         this._populateProviderCard(card, providerName, data);
@@ -264,115 +512,35 @@ class UsageTuiIndicator extends PanelMenu.Button {
         let container = new St.BoxLayout({
             vertical: true,
             x_expand: true,
-            style_class: `usage-tui-card usage-tui-provider-${providerName}`,
+            x_align: Clutter.ActorAlign.FILL,
+            style_class: `ai-usage-card ai-usage-provider-${providerName}`,
         });
 
         let header = new St.Label({
             text: providerName.toUpperCase(),
+            style_class: `ai-usage-card-header ai-usage-label-${providerName}`,
         });
-        header.hide();
         container.add_child(header);
-
-        let progressContainer = new St.BoxLayout({
-            vertical: false,
-            x_expand: true,
-            style_class: 'usage-tui-progress-row',
-        });
-
-        let progressBg = new St.BoxLayout({
-            style_class: 'usage-tui-progress-bg',
-            x_expand: true,
-        });
-
-        let progressFill = new St.Widget({
-            style_class: 'usage-tui-progress-fill',
-        });
-
-        progressBg.add_child(progressFill);
-        progressContainer.add_child(progressBg);
-
-        let progressLabel = new St.Label({
-            text: '',
-            style_class: 'usage-tui-progress-label',
-        });
-        progressContainer.add_child(progressLabel);
-
-        container.add_child(progressContainer);
-
-        const createWindowBar = (labelText) => {
-            let barContainer = new St.BoxLayout({
-                vertical: true,
-                x_expand: true,
-                style_class: 'usage-tui-window-bar',
-            });
-
-            let row = new St.BoxLayout({
-                vertical: false,
-                x_expand: true,
-                style_class: 'usage-tui-window-row',
-            });
-
-            let label = new St.Label({
-                text: labelText,
-                style_class: 'usage-tui-window-label',
-            });
-
-            let barBg = new St.BoxLayout({
-                style_class: 'usage-tui-progress-bg',
-                x_expand: true,
-            });
-
-            let barFill = new St.Widget({
-                style_class: 'usage-tui-progress-fill',
-            });
-
-            let pctLabel = new St.Label({
-                text: '',
-                style_class: 'usage-tui-window-pct',
-            });
-
-            let resetLabel = new St.Label({
-                text: '',
-                style_class: 'usage-tui-reset-label',
-            });
-
-            barBg.add_child(barFill);
-            row.add_child(label);
-            row.add_child(barBg);
-            row.add_child(pctLabel);
-            barContainer.add_child(row);
-            barContainer.add_child(resetLabel);
-            barContainer.hide();
-
-            return {container: barContainer, row, barBg, barFill, pctLabel, resetLabel};
-        };
 
         let windowBars = new St.BoxLayout({
             vertical: true,
             x_expand: true,
-            style_class: 'usage-tui-window-bars',
+            style_class: 'ai-usage-window-bars',
         });
-
-        let fiveHourBar = createWindowBar('5h');
-        let sevenDayBar = createWindowBar('7d');
-
-        windowBars.add_child(fiveHourBar.container);
-        windowBars.add_child(sevenDayBar.container);
-        windowBars.hide();
-
         container.add_child(windowBars);
 
         let statsGrid = new St.BoxLayout({
             vertical: true,
-            style_class: 'usage-tui-stats',
+            style_class: 'ai-usage-stats',
         });
 
-        let costLabel = new St.Label({style_class: 'usage-tui-cost'});
-        let byokLabel = new St.Label({style_class: 'usage-tui-stat'});
-        let requestsLabel = new St.Label({style_class: 'usage-tui-stat'});
-        let tokensLabel = new St.Label({style_class: 'usage-tui-stat'});
-        let resetsLabel = new St.Label({style_class: 'usage-tui-stat-reset'});
-        let errorLabel = new St.Label({style_class: 'usage-tui-error'});
+        /* Start hidden: an empty label would still occupy a row. */
+        let costLabel = new St.Label({style_class: 'ai-usage-cost', visible: false});
+        let byokLabel = new St.Label({style_class: 'ai-usage-stat', visible: false});
+        let requestsLabel = new St.Label({style_class: 'ai-usage-stat', visible: false});
+        let tokensLabel = new St.Label({style_class: 'ai-usage-stat', visible: false});
+        let resetsLabel = new St.Label({style_class: 'ai-usage-stat-reset', visible: false});
+        let errorLabel = new St.Label({style_class: 'ai-usage-error', visible: false});
 
         statsGrid.add_child(costLabel);
         statsGrid.add_child(byokLabel);
@@ -386,235 +554,226 @@ class UsageTuiIndicator extends PanelMenu.Button {
         return {
             container,
             header,
-            progressContainer,
-            progressBg,
-            progressFill,
-            progressLabel,
             windowBars,
-            fiveHourBar,
-            sevenDayBar,
+            bars: [],
             costLabel,
             byokLabel,
             requestsLabel,
             tokensLabel,
             resetsLabel,
             errorLabel,
-            _barData: {},
         };
+    }
+
+    _createWindowBar() {
+        let barContainer = new St.BoxLayout({
+            vertical: true,
+            x_expand: true,
+            style_class: 'ai-usage-window-bar',
+        });
+
+        let row = new St.BoxLayout({
+            vertical: false,
+            x_expand: true,
+            style_class: 'ai-usage-window-row',
+        });
+
+        let label = new St.Label({
+            text: '',
+            style_class: 'ai-usage-window-label',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+
+        let barBg = new St.BoxLayout({
+            style_class: 'ai-usage-progress-bg',
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+
+        let barFill = new St.Widget({
+            style_class: 'ai-usage-progress-fill',
+        });
+
+        let pctLabel = new St.Label({
+            text: '',
+            style_class: 'ai-usage-window-pct',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+
+        let resetLabel = new St.Label({
+            text: '',
+            style_class: 'ai-usage-reset-label',
+            visible: false,
+        });
+
+        barBg.add_child(barFill);
+        row.add_child(label);
+        row.add_child(barBg);
+        row.add_child(pctLabel);
+        barContainer.add_child(row);
+        barContainer.add_child(resetLabel);
+
+        return {container: barContainer, row, barBg, barFill, pctLabel, label, resetLabel};
+    }
+
+    _getWindowBar(card, index) {
+        while (card.bars.length <= index) {
+            let bar = this._createWindowBar();
+            card.bars.push(bar);
+            card.windowBars.add_child(bar.container);
+        }
+        return card.bars[index];
     }
 
     _populateProviderCard(card, providerName, data) {
         const metrics = data.metrics || {};
-        const isError = data.error !== null && data.error !== undefined;
+        const raw = data.raw || {};
 
-        if (isError) {
+        if (data.error !== null && data.error !== undefined) {
             card.errorLabel.text = `⚠️ ${data.error}`;
             card.errorLabel.show();
-            card.costLabel.text = '';
-            card.byokLabel.text = '';
-            card.requestsLabel.text = '';
-            card.tokensLabel.text = '';
-            card.resetsLabel.text = '';
-            card.progressFill.style_class = 'usage-tui-progress-fill usage-tui-progress-danger';
-            card.progressFill.set_width(0);
-            card.progressLabel.text = '';
+
+            /* Empty labels still claim a line each, so hide them outright -
+             * an errored card should be only as tall as its message. */
+            for (let label of [card.costLabel, card.byokLabel, card.requestsLabel,
+                card.tokensLabel, card.resetsLabel]) {
+                label.text = '';
+                label.hide();
+            }
+
             card.windowBars.hide();
-            card.fiveHourBar.container.hide();
-            card.sevenDayBar.container.hide();
-            card.progressContainer.show();
+            for (let bar of card.bars)
+                bar.container.hide();
             return;
         }
 
         card.errorLabel.hide();
 
-        const raw = data.raw || {};
-        const fiveHourUtil = raw.five_hour && raw.five_hour.utilization !== null && raw.five_hour.utilization !== undefined
-            ? raw.five_hour.utilization
-            : (raw.rate_limit && raw.rate_limit.primary_window && raw.rate_limit.primary_window.used_percent !== null && raw.rate_limit.primary_window.used_percent !== undefined
-                ? raw.rate_limit.primary_window.used_percent
-                : null);
-        const sevenDayUtil = raw.seven_day && raw.seven_day.utilization !== null && raw.seven_day.utilization !== undefined
-            ? raw.seven_day.utilization
-            : (raw.rate_limit && raw.rate_limit.secondary_window && raw.rate_limit.secondary_window.used_percent !== null && raw.rate_limit.secondary_window.used_percent !== undefined
-                ? raw.rate_limit.secondary_window.used_percent
-                : null);
+        let windows = this._extractWindows(providerName, data);
 
-        const updateWindowBar = (bar, pct, resetTime, useDays) => {
-            bar.pctLabel.text = `${pct.toFixed(1)}%`;
-            bar.barFill.style_class = `usage-tui-progress-fill ${_getProgressClass(pct)}`;
+        windows.forEach((win, index) => {
+            let bar = this._getWindowBar(card, index);
+            bar.label.text = win.label || '';
+            bar.pctLabel.text = `${win.pct.toFixed(1)}%`;
+            bar.barFill.style_class = `ai-usage-progress-fill ${_getProgressClass(win.pct)}`;
+            this._setBarFraction(bar.barBg, bar.barFill, win.pct);
 
-            GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                let barBgWidth = bar.barBg.get_width();
-                if (barBgWidth > 0) {
-                    let width = Math.round((pct / 100) * barBgWidth);
-                    bar.barFill.set_width(width);
-                }
-                return GLib.SOURCE_REMOVE;
-            });
-
-            if (resetTime) {
-                let resetDate;
-                if (typeof resetTime === 'number')
-                    resetDate = new Date(resetTime * 1000);
-                else
-                    resetDate = new Date(resetTime);
-
-                let now = new Date();
-                let diffMs = resetDate - now;
-                if (diffMs > 0) {
-                    let days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                    let hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                    let mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-                    if (useDays && days > 0)
-                        bar.resetLabel.text = `Resets in ${days}d ${hours}h ${mins}m`;
-                    else
-                        bar.resetLabel.text = `Resets in ${days * 24 + hours}h ${mins}m`;
-                    bar.resetLabel.show();
-                } else {
-                    bar.resetLabel.text = '';
-                    bar.resetLabel.hide();
-                }
+            let countdown = _formatCountdown(win.resetAt, win.useDays);
+            let details = [countdown, win.detail].filter(t => t);
+            if (details.length > 0) {
+                bar.resetLabel.text = details.join(' · ');
+                bar.resetLabel.show();
             } else {
                 bar.resetLabel.text = '';
                 bar.resetLabel.hide();
             }
 
             bar.container.show();
+        });
+
+        for (let i = windows.length; i < card.bars.length; i++)
+            card.bars[i].container.hide();
+
+        if (windows.length > 0)
+            card.windowBars.show();
+        else
+            card.windowBars.hide();
+
+        const setLabel = (label, text) => {
+            if (text) { label.text = text; label.show(); }
+            else { label.text = ''; label.hide(); }
         };
 
-        let fiveHourReset = null;
-        let sevenDayReset = null;
+        setLabel(card.costLabel, this._costText(providerName, metrics, raw));
+        setLabel(card.byokLabel, this._byokText(providerName, data));
 
-        if (raw.five_hour && raw.five_hour.resets_at)
-            fiveHourReset = raw.five_hour.resets_at;
-        if (raw.seven_day && raw.seven_day.resets_at)
-            sevenDayReset = raw.seven_day.resets_at;
-
-        if (raw.rate_limit && raw.rate_limit.primary_window && raw.rate_limit.primary_window.reset_at)
-            fiveHourReset = raw.rate_limit.primary_window.reset_at;
-        if (raw.rate_limit && raw.rate_limit.secondary_window && raw.rate_limit.secondary_window.reset_at)
-            sevenDayReset = raw.rate_limit.secondary_window.reset_at;
-
-        let hasWindowBars = false;
-        if (fiveHourUtil !== null) {
-            card._barData.fiveHour = {pct: fiveHourUtil, resetTime: fiveHourReset};
-            updateWindowBar(card.fiveHourBar, fiveHourUtil, fiveHourReset, false);
-            hasWindowBars = true;
-        } else {
-            card._barData.fiveHour = null;
-            card.fiveHourBar.container.hide();
-        }
-
-        if (sevenDayUtil !== null) {
-            card._barData.sevenDay = {pct: sevenDayUtil, resetTime: sevenDayReset};
-            updateWindowBar(card.sevenDayBar, sevenDayUtil, sevenDayReset, true);
-            hasWindowBars = true;
-        } else {
-            card._barData.sevenDay = null;
-            card.sevenDayBar.container.hide();
-        }
-
-        if (hasWindowBars) {
-            card.windowBars.show();
-            card.progressContainer.hide();
-            card.resetsLabel.hide();
-        } else {
-            card.windowBars.hide();
-            card.progressContainer.show();
-            card.resetsLabel.show();
-        }
-
-        let usagePercent = metrics.usage_percent;
-        if ((usagePercent === null || usagePercent === undefined) &&
-            metrics.limit !== null && metrics.limit !== undefined &&
-            metrics.remaining !== null && metrics.remaining !== undefined) {
-            usagePercent = ((metrics.limit - metrics.remaining) / metrics.limit) * 100;
-        }
-
-        if (!hasWindowBars) {
-            if (usagePercent !== null && usagePercent !== undefined) {
-                let pct = usagePercent;
-                card._barData.progress = {pct};
-                card.progressLabel.text = `${pct.toFixed(1)}%`;
-                card.progressFill.style_class = `usage-tui-progress-fill ${_getProgressClass(pct)}`;
-
-                GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                    let barBgWidth = card.progressBg ? card.progressBg.get_width() : 0;
-                    if (barBgWidth > 0) {
-                        let width = Math.round((pct / 100) * barBgWidth);
-                        card.progressFill.set_width(width);
-                    }
-                    return GLib.SOURCE_REMOVE;
-                });
-            } else {
-                card._barData.progress = null;
-                card.progressFill.style_class = 'usage-tui-progress-fill usage-tui-progress-none';
-                card.progressFill.set_width(0);
-                card.progressLabel.text = '';
-            }
-        } else {
-            card._barData.progress = null;
-        }
-
-        if (metrics.cost !== null && metrics.cost !== undefined) {
-            if (providerName === 'openrouter' && metrics.limit !== null && metrics.limit !== undefined)
-                card.costLabel.text = `$${metrics.cost.toFixed(4)} / $${metrics.limit.toFixed(2)}`;
-            else
-                card.costLabel.text = `$${metrics.cost.toFixed(4)}`;
-        } else if (metrics.remaining !== null && metrics.limit !== null) {
-            card.costLabel.text = `${metrics.remaining.toFixed(1)} / ${metrics.limit.toFixed(1)} credits`;
-        } else {
-            card.costLabel.text = '';
-        }
-
-        if (providerName === 'openrouter' && raw.data) {
-            let byokValue = null;
-            if (data.window === '5h')
-                byokValue = raw.data.byok_usage_daily;
-            else if (data.window === '30d')
-                byokValue = raw.data.byok_usage_monthly;
-            else
-                byokValue = raw.data.byok_usage_weekly;
-
-            if (byokValue !== null && byokValue !== undefined && byokValue > 0)
-                card.byokLabel.text = `BYOK: $${byokValue.toFixed(4)}`;
-            else
-                card.byokLabel.text = '';
-        } else {
-            card.byokLabel.text = '';
-        }
-
-        if (metrics.requests !== null && metrics.requests !== undefined)
-            card.requestsLabel.text = `${metrics.requests.toLocaleString()} requests`;
+        if (_isNumber(metrics.requests))
+            setLabel(card.requestsLabel, `${metrics.requests.toLocaleString()} requests`);
         else
-            card.requestsLabel.text = '';
+            setLabel(card.requestsLabel, '');
 
-        if (metrics.input_tokens !== null || metrics.output_tokens !== null) {
+        if (PERCENT_QUOTA_PROVIDERS.includes(providerName)) {
+            /* Token counts are already shown next to their window bar. */
+            setLabel(card.tokensLabel, '');
+        } else if (_isNumber(metrics.input_tokens) || _isNumber(metrics.output_tokens)) {
             let total = (metrics.input_tokens || 0) + (metrics.output_tokens || 0);
-            card.tokensLabel.text = `${total.toLocaleString()} tokens`;
+            setLabel(card.tokensLabel, `${total.toLocaleString()} tokens`);
         } else {
-            card.tokensLabel.text = '';
+            setLabel(card.tokensLabel, '');
         }
 
-        if (metrics.reset_at) {
-            let resetDate = new Date(metrics.reset_at);
-            let now = new Date();
-            let diffMs = resetDate - now;
-            if (diffMs > 0) {
-                let days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-                let hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                let mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-                if (days > 0)
-                    card.resetsLabel.text = `Resets in ${days}d ${hours}h ${mins}m`;
-                else
-                    card.resetsLabel.text = `Resets in ${hours}h ${mins}m`;
-            } else {
-                card.resetsLabel.text = '';
-            }
-        } else {
-            card.resetsLabel.text = '';
-        }
+        /* The bars carry their own countdown, so only show the summary reset
+         * line when there is no bar to hang it off. */
+        if (windows.length === 0)
+            setLabel(card.resetsLabel, _formatCountdown(metrics.reset_at, true));
+        else
+            setLabel(card.resetsLabel, '');
     }
+
+    _usagePercentFromMetrics(metrics) {
+        if (_isNumber(metrics.usage_percent))
+            return metrics.usage_percent;
+        if (_isNumber(metrics.limit) && metrics.limit > 0 && _isNumber(metrics.remaining))
+            return ((metrics.limit - metrics.remaining) / metrics.limit) * 100;
+        return null;
+    }
+
+    _costText(providerName, metrics, raw) {
+        if (providerName === 'zai') {
+            let level = raw.plan_level;
+            return level ? `Plan: ${String(level).toUpperCase()}` : '';
+        }
+
+        if (providerName === 'codex') {
+            let credits = raw.credits || {};
+            if (credits.unlimited)
+                return 'Credits: unlimited';
+            let balance = parseFloat(credits.balance);
+            if (_isNumber(balance) && balance > 0)
+                return `Credits: $${balance.toFixed(2)}`;
+            return '';
+        }
+
+        if (_isNumber(metrics.cost)) {
+            if (_isNumber(metrics.limit) && providerName === 'openrouter')
+                return `$${metrics.cost.toFixed(4)} / $${metrics.limit.toFixed(2)}`;
+            return `$${metrics.cost.toFixed(4)}`;
+        }
+
+        /* Percentage-based quotas must never be printed as "credits". */
+        if (PERCENT_QUOTA_PROVIDERS.includes(providerName))
+            return '';
+
+        if (_isNumber(metrics.remaining) && _isNumber(metrics.limit))
+            return `${metrics.remaining.toFixed(1)} / ${metrics.limit.toFixed(1)} credits`;
+
+        return '';
+    }
+
+    _byokText(providerName, data) {
+        if (providerName !== 'openrouter')
+            return '';
+
+        const payload = (data.raw || {}).data;
+        if (!payload)
+            return '';
+
+        let byokValue;
+        if (data.window === '5h')
+            byokValue = payload.byok_usage_daily;
+        else if (data.window === '30d')
+            byokValue = payload.byok_usage_monthly;
+        else
+            byokValue = payload.byok_usage_weekly;
+
+        if (_isNumber(byokValue) && byokValue > 0)
+            return `BYOK: $${byokValue.toFixed(4)}`;
+        return '';
+    }
+
+    /* ------------------------------------------------------------------
+     * Data
+     * ------------------------------------------------------------------ */
 
     _startAutoRefresh() {
         if (this._timeout)
@@ -622,12 +781,63 @@ class UsageTuiIndicator extends PanelMenu.Button {
 
         this._timeout = GLib.timeout_add_seconds(
             GLib.PRIORITY_DEFAULT,
-            REFRESH_INTERVAL_SECONDS,
+            this._refreshSeconds,
             () => {
                 this._refreshData();
                 return GLib.SOURCE_CONTINUE;
             }
         );
+    }
+
+    /* Two watchers with different consequences: display options only need a
+     * re-render, while a changed credential means the CLI has something new to
+     * say and is worth an actual fetch. */
+    _watchConfigFiles() {
+        try {
+            GLib.mkdir_with_parents(CONFIG_DIR, 0o755);
+
+            this._settingsMonitor = Gio.File.new_for_path(SETTINGS_PATH)
+                .monitor_file(Gio.FileMonitorFlags.NONE, null);
+            this._settingsMonitor.connect('changed', () => {
+                this._onSettingsFileChanged();
+            });
+        } catch (_e) {
+            this._settingsMonitor = null;
+        }
+
+        try {
+            this._envMonitor = Gio.File.new_for_path(ENV_FILE_PATH)
+                .monitor_file(Gio.FileMonitorFlags.NONE, null);
+            this._envMonitor.connect('changed', () => {
+                this._refreshData();
+            });
+        } catch (_e) {
+            this._envMonitor = null;
+        }
+    }
+
+    /* Re-renders from cached data. Never refetches: changing a display option
+     * must not cost a CLI call or blank the panel. */
+    _onSettingsFileChanged() {
+        this._settings = _loadSettings();
+
+        let provider = this._settings.panelProvider || 'claude';
+        if (provider !== this._panelProvider) {
+            this._panelProvider = provider;
+            this._updateProviderBadge();
+        }
+
+        this._panelWindows = this._sanitizePanelWindows(this._settings.panelWindows);
+        this._providerOrder = this._sanitizeProviderOrder(this._settings.providerOrder);
+        this._visibleProviders = this._sanitizeVisibleProviders(this._settings.visibleProviders);
+
+        let seconds = this._sanitizeRefreshSeconds(this._settings.refreshSeconds);
+        if (seconds !== this._refreshSeconds) {
+            this._refreshSeconds = seconds;
+            this._startAutoRefresh();
+        }
+
+        this._updateUI();
     }
 
     _refreshData() {
@@ -642,15 +852,15 @@ class UsageTuiIndicator extends PanelMenu.Button {
             for (let [key, value] of Object.entries(envFromFile))
                 launcher.setenv(key, value, true);
 
-            let proc = launcher.spawnv([_getUsageTuiPath(), 'show', '--json']);
+            let proc = launcher.spawnv([_getCliPath(), 'show', '--json']);
 
             proc.communicate_utf8_async(null, null, (proc, result) => {
                 try {
                     let [ok, stdout, stderr] = proc.communicate_utf8_finish(result);
 
                     if (ok && proc.get_successful() && stdout) {
-                        this._parseOutput(stdout.trim());
-                        this._updateUI();
+                        if (this._parseOutput(stdout.trim()))
+                            this._updateUI();
                     } else {
                         this._handleError(stderr || 'Command failed');
                     }
@@ -664,24 +874,19 @@ class UsageTuiIndicator extends PanelMenu.Button {
     }
 
     _parseOutput(output) {
-        console.debug('usage-tui: Parsing output');
-
         try {
             let json = JSON.parse(output);
             this._usageData = json;
             this._lastUpdated = new Date();
-            console.debug(`usage-tui: Parsed ${Object.keys(json).length} providers`);
+            return true;
         } catch (e) {
-            console.debug(`usage-tui: JSON parse error: ${e.message}`);
+            log(`ai-usage: JSON parse error: ${e.message}`);
             this._handleError(`Parse error: ${e.message}`);
+            return false;
         }
     }
 
     _updateUI() {
-        let totalCost = 0;
-        let hasCostData = false;
-        let configuredProviders = 0;
-
         const entries = Object.entries(this._usageData).sort((a, b) => {
             const aIndex = this._providerOrder.indexOf(a[0]);
             const bIndex = this._providerOrder.indexOf(b[0]);
@@ -692,39 +897,17 @@ class UsageTuiIndicator extends PanelMenu.Button {
             return a[0].localeCompare(b[0]);
         });
 
-        for (let [providerName] of entries) {
-            if (!this._providerTabs[providerName]) {
-                let tabData = this._createTab(providerName);
-                this._providerTabs[providerName] = tabData;
-                this._tabBar.add_child(tabData.button);
-            }
-        }
-
-        let firstProvider = null;
         for (let [providerName, data] of entries) {
-            if (!firstProvider)
-                firstProvider = providerName;
-
+            /* Don't even build a card for a provider the user turned off. */
+            if (!this._isProviderVisible(providerName))
+                continue;
             this._updateProviderCard(providerName, data);
-
-            if (data.metrics && data.metrics.cost !== null && data.metrics.cost !== undefined) {
-                totalCost += data.metrics.cost;
-                hasCostData = true;
-                configuredProviders++;
-            } else if (data.metrics && (data.metrics.remaining !== null || data.metrics.limit !== null)) {
-                configuredProviders++;
-            }
         }
 
-        if (!this._activeProvider && firstProvider)
-            this._switchToProvider(firstProvider);
-
-        if (hasCostData)
-            this._panelLabel.set_text(`$${totalCost.toFixed(2)}`);
-        else if (configuredProviders > 0)
-            this._panelLabel.set_text(`${configuredProviders} active`);
-        else
-            this._panelLabel.set_text('N/A');
+        this._applyProviderVisibility();
+        this._applyProviderOrder();
+        this._updatePanelLabel();
+        this._reapplyAllBarFills();
 
         if (this._lastUpdated) {
             let timeString = this._lastUpdated.toLocaleTimeString('en-US', {
@@ -735,21 +918,72 @@ class UsageTuiIndicator extends PanelMenu.Button {
         }
     }
 
-    _handleError(message) {
-        console.debug(`usage-tui Error: ${message}`);
-        this._panelLabel.set_text('Err');
-        this._lastUpdatedItem.label.set_text(`Error: ${message.substring(0, 40)}`);
+    /* A card is shown when the provider is enabled and the CLI reported it. */
+    _applyProviderVisibility() {
+        for (let [providerName, card] of Object.entries(this._providerRows)) {
+            let show = this._isProviderVisible(providerName)
+                && !!this._usageData[providerName];
+
+            if (show) {
+                /* It may have been built before being switched off, so make sure
+                 * its data is current before showing it again. */
+                if (!card.container.visible)
+                    this._populateProviderCard(card, providerName, this._usageData[providerName]);
+                card.container.show();
+            } else {
+                card.container.hide();
+            }
+        }
     }
 
-    _openTerminalWithCommand(command) {
-        try {
-            Gio.Subprocess.new(
-                ['gnome-terminal', '--', 'bash', '-c', command + '; read -p "Press Enter to close"'],
-                Gio.SubprocessFlags.NONE
-            );
-        } catch (e) {
-            console.debug(`usage-tui: Failed to open terminal: ${e.message}`);
+    /* Cards are created in whatever order the data arrived, so restack them to
+     * match the configured order. */
+    _applyProviderOrder() {
+        let index = 0;
+        for (let providerName of this._providerOrder) {
+            let card = this._providerRows[providerName];
+            if (!card)
+                continue;
+            this._providersContainer.set_child_at_index(card.container, index);
+            index++;
         }
+    }
+
+    _updatePanelLabel() {
+        this._panelLabel.set_text(this._panelText());
+    }
+
+    /* Percentage providers show the configured window(s); a provider that only
+     * has one window shows that one, and a money-based provider shows the
+     * amount spent instead of a percentage. */
+    _panelText() {
+        let data = this._usageData[this._panelProvider];
+        if (!data || data.error)
+            return 'N/A';
+
+        const metrics = data.metrics || {};
+
+        if (MONEY_PROVIDERS.includes(this._panelProvider) && _isNumber(metrics.cost))
+            return `$${metrics.cost.toFixed(2)}`;
+
+        let windows = this._extractWindows(this._panelProvider, data);
+        if (windows.length === 0)
+            return 'N/A';
+
+        let wanted = this._panelWindows === 'both' ? ['5h', '7d'] : [this._panelWindows];
+        let picks = windows.filter(w => wanted.includes(w.key));
+
+        /* Requested window missing (Codex has no 5h): fall back to what exists. */
+        if (picks.length === 0)
+            picks = windows.slice(0, wanted.length);
+
+        return picks.map(w => `${w.pct.toFixed(0)}%`).join(' · ');
+    }
+
+    _handleError(message) {
+        log(`ai-usage error: ${message}`);
+        this._panelLabel.set_text('Err');
+        this._lastUpdatedItem.label.set_text(`Error: ${String(message).substring(0, 40)}`);
     }
 
     destroy() {
@@ -758,27 +992,43 @@ class UsageTuiIndicator extends PanelMenu.Button {
             this._timeout = null;
         }
 
+        for (let name of ['_settingsMonitor', '_envMonitor']) {
+            if (this[name]) {
+                this[name].cancel();
+                this[name] = null;
+            }
+        }
+
+        for (let {barBg} of this._bars) {
+            if (barBg._aiUsageWidthId) {
+                barBg.disconnect(barBg._aiUsageWidthId);
+                barBg._aiUsageWidthId = null;
+            }
+        }
+        this._bars = [];
+
         super.destroy();
     }
 });
 
-export default class UsageTuiExtension {
+class AiUsageExtension {
     constructor() {
         this._indicator = null;
     }
 
     enable() {
-        console.debug('usage-tui: Enabling extension');
-        this._indicator = new UsageTuiIndicator();
-        Main.panel.addToStatusArea('usage-tui', this._indicator, 0, 'right');
+        this._indicator = new UsageIndicator();
+        Main.panel.addToStatusArea('ai-usage', this._indicator, 0, 'right');
     }
 
     disable() {
-        console.debug('usage-tui: Disabling extension');
-
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
         }
     }
+}
+
+function init() {
+    return new AiUsageExtension();
 }

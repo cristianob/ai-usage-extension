@@ -1,227 +1,178 @@
 /* Panel */
-.usage-tui-panel-label {
-    margin-left: 5px;
+.ai-usage-button {
+    -natural-hpadding: 13px;
+    -minimum-hpadding: 8px;
+}
+
+.ai-usage-panel-label {
+    margin-left: 3px;
+    font-size: 0.95em;
 }
 
 /* Header */
-.usage-tui-header {
-    padding: 4px 8px;
+.ai-usage-header {
+    padding: 0px 4px;
     spacing: 6px;
 }
 
-.usage-tui-header-label {
+.ai-usage-header-item {
+    padding-top: 2px;
+    padding-bottom: 2px;
+}
+
+.ai-usage-header-label {
     font-weight: bold;
     font-size: 1.1em;
 }
 
-/* Tab bar */
-.usage-tui-tab-bar {
-    padding: 4px 10px 0px 8px;
-    spacing: 0px;
-}
-
-.usage-tui-tab {
-    padding: 5px 10px;
-    border-radius: 4px 4px 0 0;
-    background-color: rgba(255, 255, 255, 0.05);
-    margin-right: 2px;
-}
-
-.usage-tui-tab-active {
-    padding: 5px 10px;
-    border-radius: 4px 4px 0 0;
-    background-color: rgba(255, 255, 255, 0.12);
-    margin-right: 2px;
-}
-
-.usage-tui-tab-active-claude {
-    border-bottom: 2px solid #D4A574;
-}
-
-.usage-tui-tab-active-openai {
-    border-bottom: 2px solid #74AA9C;
-}
-
-.usage-tui-tab-active-openrouter {
-    border-bottom: 2px solid #FF6B35;
-}
-
-.usage-tui-tab-active-copilot {
-    border-bottom: 2px solid #6E40C9;
-}
-
-.usage-tui-tab-active-codex {
-    border-bottom: 2px solid #FF6B35;
-}
-
-/* Tab label (base + per-provider color) */
-.usage-tui-tab-label {
-    font-size: 0.8em;
-    font-weight: bold;
-    color: #888;
-}
-
-.usage-tui-tab-label-claude {
-    color: #D4A574;
-}
-
-.usage-tui-tab-label-openai {
-    color: #74AA9C;
-}
-
-.usage-tui-tab-label-openrouter {
-    color: #FF6B35;
-}
-
-.usage-tui-tab-label-copilot {
-    color: #6E40C9;
-}
-
-.usage-tui-tab-label-codex {
-    color: #FF6B35;
-}
-
 /* Separator */
-.usage-tui-separator {
+.ai-usage-separator {
     margin: 0px;
 }
 
 /* Providers container */
-.usage-tui-providers {
-    padding: 2px 12px;
-    spacing: 8px;
-    min-width: 260px;
+.ai-usage-providers {
+    padding: 2px 0;
+    spacing: 12px;
+    min-width: 280px;
 }
 
-/* Provider card */
-.usage-tui-card {
-    background-color: rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
-    padding: 8px 5px 5px 5px;
-}
-
-.usage-tui-provider-claude {
-    border-left: 3px solid #D4A574;
-}
-
-.usage-tui-provider-openai {
-    border-left: 3px solid #74AA9C;
-}
-
-.usage-tui-provider-openrouter {
-    border-left: 3px solid #FF6B35;
-}
-
-.usage-tui-provider-copilot {
-    border-left: 3px solid #6E40C9;
-}
-
-.usage-tui-provider-codex {
-    border-left: 3px solid #FF6B35;
-}
-
-/* Progress bars */
-.usage-tui-progress-row {
-    spacing: 8px;
-    margin-bottom: 4px;
-}
-
-.usage-tui-progress-bg {
-    background-color: #3a3a3a;
-    border-radius: 3px;
-    height: 6px;
-}
-
-.usage-tui-progress-fill {
-    border-radius: 3px;
-    height: 6px;
-}
-
-.usage-tui-progress-ok {
-    background-color: #4CAF50;
-}
-
-.usage-tui-progress-warning {
-    background-color: #ff9800;
-}
-
-.usage-tui-progress-danger {
-    background-color: #f44336;
-}
-
-.usage-tui-progress-none {
-    background-color: #555;
-}
-
-.usage-tui-progress-label {
-    font-size: 0.9em;
-    color: #aaa;
-    min-width: 42px;
-}
-
-/* Window bars (5h / 7d) */
-.usage-tui-window-bars {
-    spacing: 2px;
-}
-
-.usage-tui-window-bar {
-    spacing: 2px;
-    margin-bottom: 4px;
-}
-
-.usage-tui-window-row {
-    spacing: 6px;
-}
-
-.usage-tui-window-label {
-    font-size: 0.85em;
-    color: #999;
-    min-width: 20px;
+/* Card header */
+.ai-usage-card-header {
+    font-size: 0.8em;
     font-weight: bold;
 }
 
-.usage-tui-window-pct {
-    font-size: 0.9em;
-    color: #aaa;
-    min-width: 42px;
+.ai-usage-label-claude {
+    color: #D4A574;
 }
 
-.usage-tui-reset-label {
-    font-size: 0.8em;
+.ai-usage-label-openrouter {
+    color: #FF6B35;
+}
+
+.ai-usage-label-codex {
+    color: #10A37F;
+}
+
+.ai-usage-label-zai {
+    color: #4D6BFE;
+}
+
+/* Provider card */
+.ai-usage-card {
+    background-color: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+    padding: 4px 6px;
+    spacing: 2px;
+}
+
+.ai-usage-provider-claude {
+    border-left: 3px solid #D4A574;
+}
+
+.ai-usage-provider-openrouter {
+    border-left: 3px solid #FF6B35;
+}
+
+.ai-usage-provider-codex {
+    border-left: 3px solid #10A37F;
+}
+
+.ai-usage-provider-zai {
+    border-left: 3px solid #4D6BFE;
+}
+
+/* Progress bars */
+.ai-usage-progress-bg {
+    background-color: #3a3a3a;
+    border-radius: 3px;
+    height: 6px;
+    min-width: 120px;
+}
+
+.ai-usage-progress-fill {
+    border-radius: 3px;
+    height: 6px;
+}
+
+.ai-usage-progress-ok {
+    background-color: #4CAF50;
+}
+
+.ai-usage-progress-warning {
+    background-color: #ff9800;
+}
+
+.ai-usage-progress-danger {
+    background-color: #f44336;
+}
+
+/* Window bars */
+.ai-usage-window-bars {
+    spacing: 2px;
+}
+
+.ai-usage-window-bar {
+    spacing: 0px;
+    margin-bottom: 1px;
+}
+
+.ai-usage-window-row {
+    spacing: 6px;
+    height: 18px;
+}
+
+.ai-usage-window-label {
+    font-size: 0.85em;
+    color: #999;
+    min-width: 24px;
+    font-weight: bold;
+}
+
+.ai-usage-window-pct {
+    font-size: 0.9em;
+    color: #aaa;
+    min-width: 46px;
+    text-align: right;
+}
+
+.ai-usage-reset-label {
+    font-size: 0.75em;
     color: #888;
-    margin-left: 26px;
+    margin-left: 30px;
 }
 
 /* Stats */
-.usage-tui-stats {
-    spacing: 2px;
-    margin-top: 4px;
+.ai-usage-stats {
+    spacing: 1px;
+    margin-top: 1px;
 }
 
-.usage-tui-cost {
+.ai-usage-cost {
     font-size: 0.95em;
     color: #ddd;
 }
 
-.usage-tui-stat {
+.ai-usage-stat {
     font-size: 0.85em;
     color: #aaa;
 }
 
-.usage-tui-stat-reset {
+.ai-usage-stat-reset {
     font-size: 0.85em;
     color: #888;
     margin-top: 2px;
 }
 
-.usage-tui-error {
+.ai-usage-error {
     font-size: 0.85em;
     color: #f44336;
     margin-top: 2px;
 }
 
 /* Footer */
-.usage-tui-last-updated {
+.ai-usage-last-updated {
     font-size: 0.85em;
     color: #666;
 }
