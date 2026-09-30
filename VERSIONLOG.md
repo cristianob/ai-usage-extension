@@ -1,5 +1,20 @@
 # Version History
 
+## v2.5.1 (2026-09-30) - Extension version 5
+
+**Fixed**
+- Claude's usage endpoint answers 429 to more than one read every 2 minutes, and
+  it was being hit far more often: every `ai-usage show` made two requests (one
+  per window, though one response carries both), and the extension, the TUI and
+  each CLI call fetched on their own. The response now lives in
+  `~/.cache/ai-usage/claude_usage.json`, shared by every process behind a file
+  lock, so the API is read at most once per 2 minutes no matter how many ask
+- a 429 is shown as a rate-limit error everywhere with the retry time, and no
+  process retries before the backoff ends (2 minutes, or `Retry-After` when
+  longer). The cache is keyed by a hash of the token, so switching accounts
+  fetches fresh data; the file holds no token
+
+
 ## v2.5.0 (2026-08-06) - Extension version 5
 
 **Added**

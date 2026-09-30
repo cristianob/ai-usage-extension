@@ -37,7 +37,7 @@ class ResultCache:
 
     DEFAULT_TTL = 120  # 2 minutes
     PROVIDER_TTLS = {
-        ProviderName.CLAUDE: 60,  # 1 minute - quota changes quickly
+        ProviderName.CLAUDE: 120,  # the API allows one read every 2 minutes
         ProviderName.OPENROUTER: 180,  # 3 minutes - credits update periodically
         ProviderName.ZAI: 60,  # 1 minute - quota changes quickly
         ProviderName.KIMI: 60,  # 1 minute - quota changes quickly

@@ -172,6 +172,12 @@ Changing an option re-renders from cached data; only a changed credential
 triggers a new CLI call. The extension watches both files, so nothing needs a
 shell reload.
 
+Claude's usage endpoint allows one read every 2 minutes. The response is kept
+in `~/.cache/ai-usage/claude_usage.json` and shared by the extension, the TUI
+and every CLI call, so no matter how many ask, the API is hit at most once per
+2 minutes. A 429 is shown as a rate-limit error everywhere, and nobody retries
+until the backoff ends (2 minutes, or longer if the API sends `Retry-After`).
+
 ### Two implementations
 
 | Directory | Shell | Module system | Preferences widgets |
