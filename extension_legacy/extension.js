@@ -20,16 +20,27 @@ const SETTINGS_PATH = CONFIG_DIR + '/extension.json';
 const CLI_NAME = 'ai-usage';
 const CLI_PATH_ENV_VAR = 'AI_USAGE_PATH';
 
-const PROVIDER_ORDER = ['claude', 'codex', 'zai', 'kimi', 'openrouter'];
+const PROVIDER_ORDER = [
+    'claude', 'codex', 'zai', 'kimi', 'opencode', 'opencode-go', 'openrouter', 'grok',
+];
+const PROVIDER_LABELS = {
+    claude: 'Claude Code', codex: 'OpenAI Codex', zai: 'Z.ai', kimi: 'Kimi Code',
+    opencode: 'OpenCode Zen', 'opencode-go': 'OpenCode Go', openrouter: 'OpenRouter',
+    grok: 'Grok Build',
+};
+const PROVIDER_CATALOG_VERSION = 2;
+/* Providers each catalog version introduced; migrating shows only the newer ones,
+ * so a provider the user hid is not switched back on. */
+const PROVIDERS_ADDED_IN_CATALOG = {1: ['opencode', 'opencode-go'], 2: ['grok']};
 
 /* Providers whose quota is expressed as a percentage, not as money/credits. */
-const PERCENT_QUOTA_PROVIDERS = ['claude', 'codex', 'zai', 'kimi'];
+const PERCENT_QUOTA_PROVIDERS = ['claude', 'codex', 'zai', 'kimi', 'opencode-go', 'grok'];
 
 /* Providers measured in money: the panel shows the amount, not a percentage. */
-const MONEY_PROVIDERS = ['openrouter'];
+const MONEY_PROVIDERS = ['opencode', 'openrouter'];
 
 /* What the panel shows for a percentage-based provider. */
-const PANEL_WINDOW_MODES = ['5h', '7d', 'both'];
+const PANEL_WINDOW_MODES = ['5h', '7d', '30d', 'both'];
 const DEFAULT_PANEL_WINDOWS = 'both';
 
 function _readTextFile(path) {
@@ -61,6 +72,26 @@ function _saveSettings(settings) {
         GLib.mkdir_with_parents(CONFIG_DIR, 0o755);
         GLib.file_set_contents(SETTINGS_PATH, JSON.stringify(settings, null, 2));
     } catch (_e) {}
+}
+
+function _migrateSettings(settings) {
+    let version = Number.isInteger(settings.providerCatalogVersion)
+        ? settings.providerCatalogVersion : 0;
+    if (version >= PROVIDER_CATALOG_VERSION)
+        return settings;
+    if (Array.isArray(settings.visibleProviders)) {
+        for (let [added, providers] of Object.entries(PROVIDERS_ADDED_IN_CATALOG)) {
+            if (Number(added) <= version)
+                continue;
+            for (let provider of providers) {
+                if (!settings.visibleProviders.includes(provider))
+                    settings.visibleProviders.push(provider);
+            }
+        }
+    }
+    settings.providerCatalogVersion = PROVIDER_CATALOG_VERSION;
+    _saveSettings(settings);
+    return settings;
 }
 
 function _parseEnvText(text) {
@@ -261,8 +292,13 @@ class UsageIndicator extends PanelMenu.Button {
         this._lastUpdated = null;
         this._settingsMonitor = null;
         this._envMonitor = null;
+        this._envRefreshDebounce = null;
+        this._refreshActive = false;
+        this._refreshPending = false;
+        this._refreshGeneration = 0;
+        this._destroyed = false;
 
-        this._settings = _loadSettings();
+        this._settings = _migrateSettings(_loadSettings());
         this._panelProvider = this._settings.panelProvider || 'claude';
         this._panelWindows = this._sanitizePanelWindows(this._settings.panelWindows);
         this._providerOrder = this._sanitizeProviderOrder(this._settings.providerOrder);
@@ -525,7 +561,7 @@ class UsageIndicator extends PanelMenu.Button {
         });
 
         let header = new St.Label({
-            text: providerName.toUpperCase(),
+            text: PROVIDER_LABELS[providerName] || providerName.toUpperCase(),
             style_class: `ai-usage-card-header ai-usage-label-${providerName}`,
         });
         container.add_child(header);
@@ -732,6 +768,24 @@ class UsageIndicator extends PanelMenu.Button {
             return '';
         }
 
+        if (providerName === 'grok') {
+            let prepaid = raw.prepaid_usd;
+            return _isNumber(prepaid) && prepaid > 0 ? `Credits: $${prepaid.toFixed(2)}` : '';
+        }
+
+        if (providerName === 'opencode') {
+            let billing = raw.billing || {};
+            if (!_isNumber(billing.balance_usd))
+                return '';
+            let text = `Balance: $${billing.balance_usd.toFixed(2)}`;
+            if (_isNumber(billing.monthly_usage_usd)) {
+                text += ` · Month: $${billing.monthly_usage_usd.toFixed(2)}`;
+                if (_isNumber(billing.monthly_limit_usd))
+                    text += ` / $${billing.monthly_limit_usd.toFixed(2)}`;
+            }
+            return text;
+        }
+
         if (_isNumber(metrics.cost)) {
             if (_isNumber(metrics.limit) && providerName === 'openrouter')
                 return `$${metrics.cost.toFixed(4)} / $${metrics.limit.toFixed(2)}`;
@@ -807,17 +861,28 @@ class UsageIndicator extends PanelMenu.Button {
             this._envMonitor = Gio.File.new_for_path(ENV_FILE_PATH)
                 .monitor_file(Gio.FileMonitorFlags.NONE, null);
             this._envMonitor.connect('changed', () => {
-                this._refreshData();
+                this._queueCredentialRefresh();
             });
         } catch (_e) {
             this._envMonitor = null;
         }
     }
 
+    _queueCredentialRefresh() {
+        if (this._envRefreshDebounce)
+            GLib.source_remove(this._envRefreshDebounce);
+        this._envRefreshDebounce = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT, 200, () => {
+                this._envRefreshDebounce = null;
+                this._refreshData();
+                return GLib.SOURCE_REMOVE;
+            });
+    }
+
     /* Re-renders from cached data. Never refetches: changing a display option
      * must not cost a CLI call or blank the panel. */
     _onSettingsFileChanged() {
-        this._settings = _loadSettings();
+        this._settings = _migrateSettings(_loadSettings());
 
         let provider = this._settings.panelProvider || 'claude';
         if (provider !== this._panelProvider) {
@@ -839,6 +904,15 @@ class UsageIndicator extends PanelMenu.Button {
     }
 
     _refreshData() {
+        if (this._destroyed)
+            return;
+        if (this._refreshActive) {
+            this._refreshPending = true;
+            return;
+        }
+
+        this._refreshActive = true;
+        let generation = ++this._refreshGeneration;
         this._panelLabel.set_text('...');
 
         try {
@@ -854,6 +928,8 @@ class UsageIndicator extends PanelMenu.Button {
 
             proc.communicate_utf8_async(null, null, (proc, result) => {
                 try {
+                    if (this._destroyed || generation !== this._refreshGeneration)
+                        return;
                     let [ok, stdout, stderr] = proc.communicate_utf8_finish(result);
 
                     if (ok && proc.get_successful() && stdout) {
@@ -864,10 +940,25 @@ class UsageIndicator extends PanelMenu.Button {
                     }
                 } catch (e) {
                     this._handleError(e.message);
+                } finally {
+                    this._finishRefresh(generation);
                 }
             });
         } catch (e) {
             this._handleError(e.message);
+            this._finishRefresh(generation);
+        }
+    }
+
+    _finishRefresh(generation) {
+        if (generation !== this._refreshGeneration)
+            return;
+        this._refreshActive = false;
+        if (this._destroyed)
+            return;
+        if (this._refreshPending) {
+            this._refreshPending = false;
+            this._refreshData();
         }
     }
 
@@ -960,6 +1051,11 @@ class UsageIndicator extends PanelMenu.Button {
 
         const metrics = data.metrics || {};
 
+        if (this._panelProvider === 'opencode') {
+            let balance = ((data.raw || {}).billing || {}).balance_usd;
+            return _isNumber(balance) ? `$${balance.toFixed(2)}` : 'N/A';
+        }
+
         if (MONEY_PROVIDERS.includes(this._panelProvider) && _isNumber(metrics.cost))
             return `$${metrics.cost.toFixed(2)}`;
 
@@ -971,8 +1067,11 @@ class UsageIndicator extends PanelMenu.Button {
         let picks = windows.filter(w => wanted.includes(w.key));
 
         /* Requested window missing (Codex has no 5h): fall back to what exists. */
-        if (picks.length === 0)
+        if (picks.length === 0 && windows.length === 1)
             picks = windows.slice(0, wanted.length);
+
+        if (picks.length === 0)
+            return 'N/A';
 
         return picks.map(w => `${w.pct.toFixed(0)}%`).join(' · ');
     }
@@ -984,9 +1083,18 @@ class UsageIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._destroyed = true;
+        this._refreshPending = false;
+        this._refreshGeneration++;
+
         if (this._timeout) {
             GLib.source_remove(this._timeout);
             this._timeout = null;
+        }
+
+        if (this._envRefreshDebounce) {
+            GLib.source_remove(this._envRefreshDebounce);
+            this._envRefreshDebounce = null;
         }
 
         for (let name of ['_settingsMonitor', '_envMonitor']) {

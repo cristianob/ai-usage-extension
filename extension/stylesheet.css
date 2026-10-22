@@ -63,6 +63,18 @@
     color: #A855F7;
 }
 
+.ai-usage-label-opencode {
+    color: #F5A524;
+}
+
+.ai-usage-label-opencode-go {
+    color: #38BDF8;
+}
+
+.ai-usage-label-grok {
+    color: #E5E7EB;
+}
+
 /* Provider card */
 .ai-usage-card {
     background-color: rgba(255, 255, 255, 0.03);
@@ -89,6 +101,18 @@
 
 .ai-usage-provider-kimi {
     border-left: 3px solid #A855F7;
+}
+
+.ai-usage-provider-opencode {
+    border-left: 3px solid #F5A524;
+}
+
+.ai-usage-provider-opencode-go {
+    border-left: 3px solid #38BDF8;
+}
+
+.ai-usage-provider-grok {
+    border-left: 3px solid #E5E7EB;
 }
 
 /* Progress bars */

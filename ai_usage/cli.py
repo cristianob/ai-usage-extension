@@ -9,25 +9,19 @@ import click
 from click.core import ParameterSource
 
 from ai_usage.config import config
-from ai_usage.providers import (
-    ClaudeOAuthProvider,
-    OpenRouterUsageProvider,
-    CodexProvider,
-    ZaiProvider,
-    KimiProvider,
+from ai_usage.providers import build_providers
+from ai_usage.providers.base import (
+    BaseProvider,
+    ProviderError,
+    ProviderName,
+    ProviderResult,
+    WindowPeriod,
 )
-from ai_usage.providers.base import BaseProvider, ProviderError, ProviderName, WindowPeriod
 
 
 def get_providers() -> dict[ProviderName, BaseProvider]:
     """Get all available providers."""
-    return {
-        ProviderName.CLAUDE: ClaudeOAuthProvider(),
-        ProviderName.CODEX: CodexProvider(),
-        ProviderName.ZAI: ZaiProvider(),
-        ProviderName.KIMI: KimiProvider(),
-        ProviderName.OPENROUTER: OpenRouterUsageProvider(),
-    }
+    return build_providers()
 
 
 def parse_window(window: str) -> WindowPeriod:
@@ -53,8 +47,9 @@ def parse_provider(provider: str) -> ProviderName | None:
         raise click.BadParameter(f"Invalid provider. Choose from: {valid}")
 
 
-def _fetch_result(provider: BaseProvider, window: WindowPeriod):
+def _fetch_result(provider: BaseProvider, window: WindowPeriod) -> ProviderResult:
     """Fetch provider metrics, converting errors into results."""
+    window = provider.normalize_window(window)
     try:
         return asyncio.run(provider.fetch(window))
     except ProviderError as exc:
@@ -63,10 +58,37 @@ def _fetch_result(provider: BaseProvider, window: WindowPeriod):
         return provider._make_error_result(window=window, error=f"Unexpected error: {exc}")
 
 
+async def _fetch_many(
+    providers: dict[ProviderName, BaseProvider], window: WindowPeriod
+) -> dict[str, ProviderResult]:
+    """Fetch providers concurrently while isolating failures."""
+    semaphore = asyncio.Semaphore(4)
+
+    async def fetch_one(
+        name: ProviderName, provider: BaseProvider
+    ) -> tuple[str, ProviderResult]:
+        effective_window = provider.normalize_window(window)
+        async with semaphore:
+            try:
+                result = await provider.fetch(effective_window)
+            except ProviderError as exc:
+                result = provider._make_error_result(effective_window, str(exc))
+            except Exception as exc:
+                result = provider._make_error_result(
+                    effective_window, f"Unexpected error: {exc}"
+                )
+        return name.value, result
+
+    pairs = await asyncio.gather(
+        *(fetch_one(name, provider) for name, provider in providers.items())
+    )
+    return dict(pairs)
+
+
 @click.group()
 @click.version_option()
 def main() -> None:
-    """Usage metrics TUI for Claude, Codex, Z.ai, Kimi Code and OpenRouter."""
+    """Usage metrics for Claude, Codex, Z.ai, Kimi, OpenCode, OpenRouter and Grok."""
     pass
 
 
@@ -75,7 +97,7 @@ def main() -> None:
     "--provider",
     "-p",
     default="all",
-    help="Provider to query (claude, codex, zai, kimi, openrouter, all)",
+    help="Provider (claude, codex, zai, kimi, opencode, opencode-go, openrouter, grok, all)",
 )
 @click.option(
     "--window",
@@ -106,18 +128,26 @@ def show(provider: str, window: str, output_json: bool) -> None:
             sys.exit(1)
         providers = {provider_filter: providers[provider_filter]}
 
+    configured = {name: prov for name, prov in providers.items() if prov.is_configured()}
+
+    if output_json:
+        results = asyncio.run(_fetch_many(configured, window_period))
+        output = {k: v.model_dump(mode="json") for k, v in results.items()}
+        click.echo(json.dumps(output, indent=2))
+        return
+
     results = {}
     for name, prov in providers.items():
         if not prov.is_configured():
-            if not output_json:
-                click.echo(f"\n{name.value}: Not configured")
-                click.echo(f"  Set {config.ENV_VARS.get(name)} environment variable")
+            status = config.get_provider_status(name)
+            missing = ", ".join(status["missing_credentials"])
+            click.echo(f"\n{name.value}: Not configured")
+            click.echo(f"  Set {missing}")
             continue
 
         # Show both 5h and 7d windows for quota-based providers when using default window
         show_dual_windows = (
-            not output_json
-            and window_source == ParameterSource.DEFAULT
+            window_source == ParameterSource.DEFAULT
             and name in {ProviderName.CLAUDE, ProviderName.ZAI, ProviderName.KIMI}
         )
 
@@ -130,12 +160,7 @@ def show(provider: str, window: str, output_json: bool) -> None:
         else:
             result = _fetch_result(prov, window_period)
             results[name.value] = result
-            if not output_json:
-                _print_result(name, result)
-
-    if output_json:
-        output = {k: v.model_dump(mode="json") for k, v in results.items()}
-        click.echo(json.dumps(output, indent=2))
+            _print_result(name, result)
 
 
 def _print_result(name: ProviderName, result, label: str | None = None) -> None:
@@ -152,26 +177,50 @@ def _print_result(name: ProviderName, result, label: str | None = None) -> None:
 
     m = result.metrics
 
+    windows = result.raw.get("windows")
+    if isinstance(windows, list):
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            utilization = window.get("utilization")
+            if isinstance(utilization, bool) or not isinstance(utilization, (int, float)):
+                continue
+            pct = float(utilization)
+            color = "green" if pct < 50 else ("yellow" if pct < 80 else "red")
+            label_text = str(window.get("label", "quota"))
+            click.echo(
+                f"{label_text:<9} {_progress_bar(pct)} "
+                f"{click.style(f'{pct:.1f}%', fg=color)}"
+            )
+            reset = _parse_reset(window.get("resets_at"))
+            if reset:
+                reset_text = _format_reset(reset)
+                if reset_text:
+                    click.echo(f"{'resets':<9} {reset_text}")
+
     # Usage percentage (Claude)
-    if m.usage_percent is not None:
+    if not isinstance(windows, list) and m.usage_percent is not None:
         pct = m.usage_percent
         color = "green" if pct < 50 else ("yellow" if pct < 80 else "red")
         bar = _progress_bar(pct)
         click.echo(f"Usage:    {bar} {click.style(f'{pct:.1f}%', fg=color)}")
 
     # Reset time
-    if m.reset_at:
-        from datetime import datetime, timezone
-
-        delta = m.reset_at - datetime.now(timezone.utc)
-        if delta.total_seconds() > 0:
-            hours = int(delta.total_seconds() // 3600)
-            mins = int((delta.total_seconds() % 3600) // 60)
-            click.echo(f"Resets:   {hours}h {mins}m")
+    if not isinstance(windows, list) and m.reset_at:
+        reset_text = _format_reset(m.reset_at)
+        if reset_text:
+            click.echo(f"Resets:   {reset_text}")
 
     # Cost
     if m.cost is not None:
         click.echo(f"Cost:     ${m.cost:.4f}")
+
+    billing = result.raw.get("billing")
+    if isinstance(billing, dict) and isinstance(billing.get("balance_usd"), (int, float)):
+        click.echo(f"Balance:  ${billing['balance_usd']:.4f}")
+        monthly_limit = billing.get("monthly_limit_usd")
+        if isinstance(monthly_limit, (int, float)):
+            click.echo(f"Limit:    ${monthly_limit:.4f}")
 
     # Requests
     if m.requests is not None:
@@ -187,9 +236,34 @@ def _print_result(name: ProviderName, result, label: str | None = None) -> None:
 
 def _progress_bar(percent: float, width: int = 20) -> str:
     """Create a text progress bar."""
-    filled = int(width * percent / 100)
+    filled = int(width * max(0.0, min(percent, 100.0)) / 100)
     empty = width - filled
     return f"[{'#' * filled}{'-' * empty}]"
+
+
+def _parse_reset(value: object) -> datetime | None:
+    """Parse an allowlisted provider reset timestamp as UTC."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_reset(reset_at: datetime) -> str | None:
+    """Return a compact duration until a reset."""
+    if reset_at.tzinfo is None:
+        reset_at = reset_at.replace(tzinfo=timezone.utc)
+    delta = reset_at.astimezone(timezone.utc) - datetime.now(timezone.utc)
+    if delta.total_seconds() <= 0:
+        return None
+    hours = int(delta.total_seconds() // 3600)
+    mins = int((delta.total_seconds() % 3600) // 60)
+    return f"{hours}h {mins}m"
 
 
 @main.command()
@@ -209,10 +283,11 @@ def doctor() -> None:
 
         # Check configuration
         if info["configured"]:
-            click.echo(f"  Config:     {click.style('OK', fg='green')} ({info['token_preview']})")
+            preview = f" ({info['token_preview']})" if info["token_preview"] else ""
+            click.echo(f"  Config:     {click.style('OK', fg='green')}{preview}")
         else:
             click.echo(f"  Config:     {click.style('MISSING', fg='red')}")
-            click.echo(f"              Set: {info['env_var']}")
+            click.echo(f"              Set: {', '.join(info['missing_credentials'])}")
             all_ok = False
             click.echo()
             continue
@@ -279,6 +354,33 @@ def setup() -> None:
         click.echo("  -> Set")
     else:
         click.echo("  -> Skipped")
+    click.echo()
+
+    # OpenCode Go API key
+    click.echo(click.style("OpenCode Go", bold=True))
+    click.echo("  Skip this if OpenCode already stores an opencode-go credential.")
+    opencode_key = click.prompt("  OPENCODE_API_KEY", default="", show_default=False).strip()
+    if opencode_key:
+        updates["OPENCODE_API_KEY"] = opencode_key
+        click.echo("  -> Set")
+    else:
+        click.echo("  -> Skipped")
+    click.echo()
+
+    # OpenCode Zen browser session
+    click.echo(click.style("OpenCode Zen", bold=True))
+    click.echo("  Uses the workspace billing page and its private auth cookie.")
+    workspace_id = click.prompt(
+        "  OPENCODE_WORKSPACE_ID", default="", show_default=False
+    ).strip()
+    auth_cookie = click.prompt(
+        "  OPENCODE_AUTH_COOKIE", default="", show_default=False, hide_input=True
+    ).strip()
+    if workspace_id:
+        updates["OPENCODE_WORKSPACE_ID"] = workspace_id
+    if auth_cookie:
+        updates["OPENCODE_AUTH_COOKIE"] = auth_cookie
+    click.echo("  -> Set" if workspace_id and auth_cookie else "  -> Skipped/incomplete")
     click.echo()
 
     # OpenRouter API key

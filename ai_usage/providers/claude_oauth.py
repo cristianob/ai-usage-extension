@@ -1,12 +1,8 @@
 """Claude OAuth provider for Claude Code subscription quota."""
 
-import asyncio
-import fcntl
 import hashlib
 import json
 import os
-import time
-from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -14,6 +10,7 @@ from pathlib import Path
 import httpx
 
 from ai_usage.claude_cli_auth import extract_claude_cli_token
+from ai_usage.file_lock import cache_dir, file_lock
 from ai_usage.providers.base import (
     AuthenticationError,
     BaseProvider,
@@ -28,12 +25,6 @@ from ai_usage.providers.base import (
 # The usage endpoint answers 429 to more than one read every 2 minutes per account.
 MIN_FETCH_INTERVAL = timedelta(seconds=120)
 LOCK_TIMEOUT_SECONDS = 45.0
-
-
-def _cache_dir() -> Path:
-    xdg_cache = os.environ.get("XDG_CACHE_HOME")
-    base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
-    return base / "ai-usage"
 
 
 @dataclass
@@ -55,29 +46,12 @@ class _SharedUsageCache:
     """
 
     def __init__(self, directory: Path | None = None) -> None:
-        self._dir = directory or _cache_dir()
+        self._dir = directory or cache_dir()
         self._path = self._dir / "claude_usage.json"
         self._lock_path = self._dir / "claude_usage.lock"
 
-    @asynccontextmanager
-    async def locked(self):
-        self._dir.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self._lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            # Poll instead of blocking: coroutines of the same process each hold
-            # their own descriptor, and a blocking flock would stall the event loop.
-            deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
-            while True:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() > deadline:
-                        raise TimeoutError("another ai-usage process is holding the Claude lock")
-                    await asyncio.sleep(0.1)
-            yield
-        finally:
-            os.close(fd)
+    def locked(self):
+        return file_lock(self._lock_path, LOCK_TIMEOUT_SECONDS)
 
     def read(self, account: str) -> _Snapshot | None:
         try:

@@ -23,7 +23,10 @@ class ProviderName(str, Enum):
     CODEX = "codex"
     ZAI = "zai"
     KIMI = "kimi"
+    OPENCODE_ZEN = "opencode"
+    OPENCODE_GO = "opencode-go"
     OPENROUTER = "openrouter"
+    GROK = "grok"
 
 
 class UsageMetrics(BaseModel):
@@ -93,6 +96,10 @@ class BaseProvider(ABC):
 
     name: ProviderName
 
+    def normalize_window(self, window: WindowPeriod) -> WindowPeriod:
+        """Return the effective window represented by this provider's result."""
+        return window
+
     @abstractmethod
     async def fetch(self, window: WindowPeriod = WindowPeriod.DAY_7) -> ProviderResult:
         """
@@ -134,6 +141,7 @@ class BaseProvider(ABC):
         self, window: WindowPeriod, error: str, raw: dict[str, Any] | None = None
     ) -> ProviderResult:
         """Helper to create an error result."""
+        window = self.normalize_window(window)
         return ProviderResult(
             provider=self.name,
             window=window,

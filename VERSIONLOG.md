@@ -1,5 +1,36 @@
 # Version History
 
+## v2.6.0 (2026-10-22) - Extension version 6
+
+**Added**
+- Grok Build provider: the Grok CLI's subscription allowance (SuperGrok /
+  X Premium+), the same meter its `/usage` command shows - weekly or monthly,
+  as a percentage with the reset time, plus prepaid credits when there are any.
+  It reads the endpoint the CLI itself uses (`cli-chat-proxy.grok.com/v1/billing`)
+  and reuses the `grok login` session from `~/.grok/auth.json` (`GROK_HOME`,
+  `GROK_AUTH_PATH`); there is nothing to configure. API-key logins are ignored
+- the grok session lasts about 6 hours and its refresh tokens are single-use,
+  so ai-usage never refreshes it. When it has expired, ai-usage runs
+  `grok models` - which spends no usage - so grok renews its own session under
+  its own lock, then reads it again. One renewal at a time across processes, a
+  60 s timeout, and no new attempt within 10 minutes of a failed one
+- OpenCode Zen provider: wallet balance and monthly pay-as-you-go spend, read
+  from the authenticated workspace billing page (`OPENCODE_WORKSPACE_ID` +
+  `OPENCODE_AUTH_COOKIE`); only normalized USD amounts are kept
+- OpenCode Go provider: rolling 5h, weekly and monthly quota from the official
+  usage endpoint, reading the `opencode-go` entry of OpenCode's `auth.json` or
+  `OPENCODE_API_KEY`
+- the panel can show the 30d window
+
+**Changed**
+- providers are built from one registry in `providers/__init__.py`
+- the extension settings carry a provider catalog version; an upgrade makes
+  visible only the providers introduced since the saved version, so a provider
+  the user hid stays hidden
+- the cross-process file lock used by the Claude cache moved to
+  `ai_usage/file_lock.py` and is shared with the Grok renewal
+
+
 ## v2.5.1 (2026-09-30) - Extension version 5
 
 **Fixed**

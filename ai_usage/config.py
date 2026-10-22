@@ -77,6 +77,12 @@ class Config:
         ProviderName.CODEX: "CODEX_ACCESS_TOKEN",
         ProviderName.ZAI: "ZAI_API_KEY",
         ProviderName.KIMI: "KIMI_API_KEY",
+        ProviderName.OPENCODE_GO: "OPENCODE_API_KEY",
+    }
+
+    CREDENTIAL_HINTS = {
+        ProviderName.OPENCODE_ZEN: "OPENCODE_WORKSPACE_ID + OPENCODE_AUTH_COOKIE",
+        ProviderName.GROK: "grok login (~/.grok/auth.json)",
     }
 
     # Provider descriptions
@@ -110,6 +116,24 @@ class Config:
             "description": "Kimi Code (Moonshot AI) coding plan quota windows",
             "official": False,
             "note": "Needs a Kimi Code key (sk-kimi-...), not an open-platform key",
+        },
+        ProviderName.OPENCODE_ZEN: {
+            "name": "OpenCode Zen",
+            "description": "OpenCode Zen balance and monthly pay-as-you-go spend",
+            "official": False,
+            "note": "Reads the authenticated billing page; keep the auth cookie private",
+        },
+        ProviderName.OPENCODE_GO: {
+            "name": "OpenCode Go",
+            "description": "OpenCode Go rolling, weekly and monthly subscription quota",
+            "official": True,
+            "note": "Reads the official Go usage API",
+        },
+        ProviderName.GROK: {
+            "name": "Grok Build",
+            "description": "Grok CLI subscription allowance (weekly or monthly)",
+            "official": False,
+            "note": "Reuses the `grok login` session in ~/.grok/auth.json; never refreshes it",
         },
     }
 
@@ -167,6 +191,17 @@ class Config:
             found = ZaiCredentialStore().load()
             return found[0] if found else None
 
+        if provider == ProviderName.OPENCODE_GO:
+            from ai_usage.providers.opencode_go import OpenCodeGoCredentialStore
+
+            return OpenCodeGoCredentialStore().load()
+
+        if provider == ProviderName.GROK:
+            from ai_usage.providers.grok import GrokCredentialStore
+
+            creds = GrokCredentialStore().load()
+            return creds.key if creds else None
+
         return None
 
     def is_provider_configured(self, provider: ProviderName) -> bool:
@@ -175,24 +210,9 @@ class Config:
 
         Delegates to provider's is_configured() method for accurate detection.
         """
-        # Import providers lazily to avoid circular imports
-        from ai_usage.providers import (
-            ClaudeOAuthProvider,
-            OpenRouterUsageProvider,
-            CodexProvider,
-            ZaiProvider,
-            KimiProvider,
-        )
+        from ai_usage.providers import PROVIDER_CLASSES
 
-        provider_map = {
-            ProviderName.CLAUDE: ClaudeOAuthProvider,
-            ProviderName.OPENROUTER: OpenRouterUsageProvider,
-            ProviderName.CODEX: CodexProvider,
-            ProviderName.ZAI: ZaiProvider,
-            ProviderName.KIMI: KimiProvider,
-        }
-
-        provider_class = provider_map.get(provider)
+        provider_class = PROVIDER_CLASSES.get(provider)
         if provider_class:
             return provider_class().is_configured()
 
@@ -201,8 +221,20 @@ class Config:
     def get_provider_status(self, provider: ProviderName) -> dict[str, Any]:
         """Get detailed status for a provider."""
         info = self.PROVIDER_INFO.get(provider, {})
-        env_var = self.ENV_VARS.get(provider, "UNKNOWN")
+        env_var = self.ENV_VARS.get(provider)
+        credential_hint = self.CREDENTIAL_HINTS.get(provider, env_var or "automatic credentials")
         configured = self.is_provider_configured(provider)
+
+        missing_credentials: list[str] = []
+        if not configured:
+            if provider == ProviderName.OPENCODE_ZEN:
+                from ai_usage.providers.opencode_zen import missing_zen_credentials
+
+                missing_credentials = missing_zen_credentials()
+            elif provider == ProviderName.GROK:
+                missing_credentials = ["a `grok login` session"]
+            elif env_var:
+                missing_credentials = [env_var]
 
         return {
             "provider": provider.value,
@@ -210,9 +242,10 @@ class Config:
             "description": info.get("description", ""),
             "official": info.get("official", False),
             "note": info.get("note", ""),
-            "env_var": env_var,
+            "env_var": credential_hint,
             "configured": configured,
             "token_preview": self._get_token_preview(provider) if configured else None,
+            "missing_credentials": missing_credentials,
         }
 
     def get_all_provider_status(self) -> list[dict[str, Any]]:
@@ -221,6 +254,8 @@ class Config:
 
     def _get_token_preview(self, provider: ProviderName) -> str | None:
         """Get a safe preview of the token (first/last few chars)."""
+        if provider == ProviderName.OPENCODE_ZEN:
+            return None
         token = self.get_token(provider)
         if not token or len(token) < 12:
             return None
@@ -232,11 +267,14 @@ class Config:
 
         for provider in ProviderName:
             env_var = self.ENV_VARS.get(provider)
+            credential_hint = self.CREDENTIAL_HINTS.get(
+                provider, env_var or "automatic credentials"
+            )
             info = self.PROVIDER_INFO.get(provider, {})
             configured = self.is_provider_configured(provider)
             status = "[OK]" if configured else "[NOT SET]"
 
-            lines.append(f"  {env_var}  {status}")
+            lines.append(f"  {credential_hint}  {status}")
             lines.append(f"    {info.get('description', '')}")
             if note := info.get("note"):
                 lines.append(f"    Note: {note}")

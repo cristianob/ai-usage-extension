@@ -1,5 +1,6 @@
 """Textual TUI for usage metrics."""
 
+import asyncio
 import json
 from datetime import datetime, timezone
 
@@ -23,13 +24,7 @@ from textual.widgets import (
 
 from ai_usage.cache import ResultCache
 from ai_usage.config import config
-from ai_usage.providers import (
-    ClaudeOAuthProvider,
-    CodexProvider,
-    OpenRouterUsageProvider,
-    ZaiProvider,
-    KimiProvider,
-)
+from ai_usage.providers import build_providers
 from ai_usage.providers.base import (
     BaseProvider,
     ProviderName,
@@ -128,8 +123,9 @@ class ProviderCard(Static):
         yield Label(name, classes="card-title")
 
         if not configured:
+            missing = ", ".join(self.provider_info["missing_credentials"])
             yield Label(
-                f"Not configured - set {self.provider_info['env_var']}",
+                f"Not configured - set {missing}",
                 classes="card-subtitle",
             )
             self.add_class("unconfigured")
@@ -158,18 +154,54 @@ class ProviderCard(Static):
             return
 
         # Update status line with last update time
-        age = datetime.now(timezone.utc) - result.updated_at.replace(tzinfo=timezone.utc)
+        updated_at = result.updated_at
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        else:
+            updated_at = updated_at.astimezone(timezone.utc)
+        age = datetime.now(timezone.utc) - updated_at
         age_str = self._format_age(age.total_seconds())
         status_line.update(f"Updated {age_str} ago | Window: {result.window.value}")
 
         # Build metrics display
         metrics = result.metrics
 
+        windows = result.raw.get("windows")
+        if isinstance(windows, list):
+            for window in windows:
+                if not isinstance(window, dict):
+                    continue
+                pct = window.get("utilization")
+                if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+                    continue
+                metrics_container.mount(
+                    Label(str(window.get("label", "Quota")), classes="metric-label")
+                )
+                bar = ProgressBar(total=100, show_eta=False)
+                bar.progress = max(0.0, min(float(pct), 100.0))
+                metrics_container.mount(bar)
+                pct_label = Label(f"{float(pct):.1f}% used", classes="metric-value")
+                if pct > 80:
+                    pct_label.add_class("warning")
+                if pct > 95:
+                    pct_label.add_class("error")
+                metrics_container.mount(pct_label)
+                reset_at = self._parse_reset(window.get("resets_at"))
+                if reset_at:
+                    seconds = (reset_at - datetime.now(timezone.utc)).total_seconds()
+                    if seconds > 0:
+                        metrics_container.mount(
+                            Label(
+                                f"Resets in {self._format_duration(seconds)}",
+                                classes="card-subtitle",
+                            )
+                        )
+
         # Usage bar for Claude (has limit/remaining)
-        if metrics.usage_percent is not None:
+        if not isinstance(windows, list) and metrics.usage_percent is not None:
             pct = metrics.usage_percent
             bar = ProgressBar(total=100, show_eta=False)
-            bar.progress = pct
+            bar.progress = max(0.0, min(pct, 100.0))
             metrics_container.mount(bar)
 
             pct_label = Label(f"{pct:.1f}% used", classes="metric-value")
@@ -180,8 +212,13 @@ class ProviderCard(Static):
             metrics_container.mount(pct_label)
 
         # Reset time
-        if metrics.reset_at:
-            reset_delta = metrics.reset_at - datetime.now(timezone.utc)
+        if not isinstance(windows, list) and metrics.reset_at:
+            reset_at = metrics.reset_at
+            if reset_at.tzinfo is None:
+                reset_at = reset_at.replace(tzinfo=timezone.utc)
+            else:
+                reset_at = reset_at.astimezone(timezone.utc)
+            reset_delta = reset_at - datetime.now(timezone.utc)
             if reset_delta.total_seconds() > 0:
                 reset_str = self._format_duration(reset_delta.total_seconds())
                 metrics_container.mount(
@@ -201,6 +238,29 @@ class ProviderCard(Static):
                     classes="metric-row",
                 )
             )
+
+        billing = result.raw.get("billing")
+        if isinstance(billing, dict):
+            balance = billing.get("balance_usd")
+            if isinstance(balance, (int, float)) and not isinstance(balance, bool):
+                metrics_container.mount(
+                    Horizontal(
+                        Label("Balance:", classes="metric-label"),
+                        Label(f"${balance:.4f}", classes="metric-value"),
+                        classes="metric-row",
+                    )
+                )
+            monthly_limit = billing.get("monthly_limit_usd")
+            if isinstance(monthly_limit, (int, float)) and not isinstance(
+                monthly_limit, bool
+            ):
+                metrics_container.mount(
+                    Horizontal(
+                        Label("Month limit:", classes="metric-label"),
+                        Label(f"${monthly_limit:.4f}", classes="metric-value"),
+                        classes="metric-row",
+                    )
+                )
 
         # Requests
         if metrics.requests is not None:
@@ -255,6 +315,18 @@ class ProviderCard(Static):
             parts.append(f"{hours}h")
         parts.append(f"{minutes}m")
         return " ".join(parts)
+
+    def _parse_reset(self, value: object) -> datetime | None:
+        """Parse a provider reset timestamp as UTC."""
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
 
 class RawJsonView(Static):
@@ -365,13 +437,7 @@ class UsageTUI(App):
     def __init__(self) -> None:
         super().__init__()
         self.cache = ResultCache()
-        self.providers: dict[ProviderName, BaseProvider] = {
-            ProviderName.CLAUDE: ClaudeOAuthProvider(),
-            ProviderName.OPENROUTER: OpenRouterUsageProvider(),
-            ProviderName.CODEX: CodexProvider(),
-            ProviderName.ZAI: ZaiProvider(),
-            ProviderName.KIMI: KimiProvider(),
-        }
+        self.providers: dict[ProviderName, BaseProvider] = build_providers()
         self.results: dict[ProviderName, ProviderResult | None] = {}
 
     def compose(self) -> ComposeResult:
@@ -385,14 +451,11 @@ class UsageTUI(App):
                         Button("7d", id="btn-7d", classes="window-button active"),
                         id="controls",
                     )
-                    yield VerticalScroll(
-                        ProviderCard(ProviderName.CLAUDE, id="card-claude"),
-                        ProviderCard(ProviderName.OPENROUTER, id="card-openrouter"),
-                        ProviderCard(ProviderName.CODEX, id="card-codex"),
-                        ProviderCard(ProviderName.ZAI, id="card-zai"),
-                        ProviderCard(ProviderName.KIMI, id="card-kimi"),
-                        id="cards-container",
-                    )
+                    with VerticalScroll(id="cards-container"):
+                        for provider_name in self.providers:
+                            yield ProviderCard(
+                                provider_name, id=f"card-{provider_name.value}"
+                            )
                 with TabPane("Raw JSON", id="json-tab"):
                     yield RawJsonView(id="json-view")
         yield Footer()
@@ -400,7 +463,7 @@ class UsageTUI(App):
     async def on_mount(self) -> None:
         """Initialize and fetch data on mount."""
         self._update_window_buttons()
-        await self.action_refresh()
+        await self._refresh(force=False)
 
     @on(Button.Pressed, "#refresh-btn")
     async def on_refresh_pressed(self) -> None:
@@ -419,6 +482,28 @@ class UsageTUI(App):
 
     async def action_refresh(self) -> None:
         """Refresh all provider data."""
+        await self._refresh(force=True)
+
+    async def _refresh(self, force: bool) -> None:
+        """Refresh provider data, optionally bypassing the cache."""
+        semaphore = asyncio.Semaphore(4)
+
+        async def fetch_one(
+            provider_name: ProviderName, provider: BaseProvider
+        ) -> tuple[ProviderName, ProviderResult]:
+            effective_window = provider.normalize_window(self.window)
+            cached = None if force else self.cache.get(provider_name, effective_window)
+            if cached:
+                return provider_name, cached
+            async with semaphore:
+                try:
+                    result = await provider.fetch(effective_window)
+                    self.cache.set(result)
+                except Exception as error:
+                    result = provider._make_error_result(effective_window, str(error))
+            return provider_name, result
+
+        tasks = []
         for provider_name, provider in self.providers.items():
             if not provider.is_configured():
                 continue
@@ -426,25 +511,12 @@ class UsageTUI(App):
             card = self._get_card(provider_name)
             if card:
                 card.is_loading = True
+            tasks.append(asyncio.create_task(fetch_one(provider_name, provider)))
 
-            # Check cache first
-            cached = self.cache.get(provider_name, self.window)
-            if cached:
-                self.results[provider_name] = cached
-                if card:
-                    card.result = cached
-                    card.is_loading = False
-                continue
-
-            # Fetch fresh data
-            try:
-                result = await provider.fetch(self.window)
-                self.cache.set(result)
-                self.results[provider_name] = result
-            except Exception as e:
-                result = provider._make_error_result(self.window, str(e))
-                self.results[provider_name] = result
-
+        for task in asyncio.as_completed(tasks):
+            provider_name, result = await task
+            self.results[provider_name] = result
+            card = self._get_card(provider_name)
             if card:
                 card.result = result
                 card.is_loading = False
@@ -456,15 +528,13 @@ class UsageTUI(App):
         """Switch to 5 hour window."""
         self.window = WindowPeriod.HOUR_5
         self._update_window_buttons()
-        self.cache.invalidate()  # Clear cache to force refresh with new window
-        await self.action_refresh()
+        await self._refresh(force=False)
 
     async def action_window_7d(self) -> None:
         """Switch to 7 day window."""
         self.window = WindowPeriod.DAY_7
         self._update_window_buttons()
-        self.cache.invalidate()
-        await self.action_refresh()
+        await self._refresh(force=False)
 
     async def action_toggle_json(self) -> None:
         """Toggle JSON view."""

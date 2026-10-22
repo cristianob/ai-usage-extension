@@ -1,7 +1,8 @@
 # AI Usage
 
 **AI provider quotas in a GNOME panel indicator and a terminal UI.**
-Claude, Codex, Z.ai, Kimi Code and OpenRouter, side by side.
+Claude, Codex, Z.ai, Kimi Code, OpenCode Zen, OpenCode Go, OpenRouter and Grok
+Build, side by side.
 
 Two pieces:
 
@@ -91,11 +92,47 @@ ai-usage tui         # full TUI
 | OpenAI Codex | weekly only | `~/.codex/auth.json`, or `CODEX_ACCESS_TOKEN` |
 | Z.ai / ZCode (GLM Coding Plan) | 5h + weekly | ZCode / OpenCode / Claude Code credentials, or `ZAI_API_KEY` |
 | Kimi Code (Moonshot AI) | whatever the plan has | Kimi CLI / OpenCode / Claude Code credentials, or `KIMI_API_KEY` |
+| OpenCode Zen | balance + monthly spend | `OPENCODE_WORKSPACE_ID` + `OPENCODE_AUTH_COOKIE` |
+| OpenCode Go | rolling 5h + weekly + monthly | OpenCode `auth.json`, or `OPENCODE_API_KEY` |
 | OpenRouter | spend-limit window | `OPENROUTER_API_KEY` |
+| Grok Build (`grok` CLI) | weekly or monthly allowance | `grok login` session in `~/.grok/auth.json` |
 
 Codex dropped its 5 hour window: the ChatGPT backend now returns a single
 `primary_window` covering 604800 seconds, so only a weekly bar is shown. Window
 labels are always derived from the data, never from a provider's position.
+
+### OpenCode Zen and Go
+
+OpenCode Go uses the official subscription usage endpoint and reads the exact
+`opencode-go` entry from `~/.local/share/opencode/auth.json`. An `opencode`
+entry is a deliberate fallback for accounts whose same API key also has Go
+entitlement. HTTP 403 means the key is valid but the Go subscription is absent.
+
+Zen's public API does not currently expose wallet balance, so ai-usage reads the
+authenticated workspace billing page. Open the billing page, copy its `wrk_...`
+workspace segment and the value of the `auth` browser cookie into:
+
+```bash
+OPENCODE_WORKSPACE_ID=wrk_...
+OPENCODE_AUTH_COOKIE='Fe26.2**...'
+```
+
+The cookie is a private session credential. The parser persists only normalized
+USD amounts; it never caches the page, customer/payment fields, cookie or HTTP
+body. Zen balance is shown separately from monthly spend and limit.
+
+### Grok Build
+
+The Grok CLI's subscription allowance (SuperGrok / X Premium+) — the same
+meter its `/usage` command shows, as a percentage with the reset time. There is
+nothing to configure: run `grok login` once and ai-usage reuses that session
+from `~/.grok/auth.json` (or `$GROK_HOME`, `$GROK_AUTH_PATH`).
+
+ai-usage only reads that file and never refreshes the session: grok's refresh
+tokens are single-use, so spending one would sign the CLI out. When the session
+expires, the card says so, and the next `grok` run renews it. An API-key login
+(`grok login --api-key`) has no subscription meter and is ignored. The endpoint
+is the CLI's own and undocumented, so it may change without notice.
 
 ### Kimi Code credential discovery
 
@@ -149,9 +186,9 @@ surfaced as `No active coding plan for this key`.
 UUID `ai-usage@local`. One card per provider, one progress bar per quota window,
 with the reset countdown under each bar.
 
-The panel number comes from the pinned provider: the 5h window, the 7d window,
-or both separated by a bullet (`46% · 59%`). Providers with a single window show
-that one; money-based providers (OpenRouter) show the amount spent.
+The panel number comes from the pinned provider: the 5h, 7d or 30d window, or
+5h + 7d separated by a bullet (`46% · 59%`). Providers with a single window show
+that one; OpenCode Zen shows wallet balance and OpenRouter shows amount spent.
 
 The popup itself holds only **Refresh Now** and **Settings & API Keys** — every
 option lives in the preferences window.
@@ -162,7 +199,8 @@ option lives in the preferences window.
 
 - **API Keys** — a password field per provider key, written to
   `~/.config/ai-usage/env` (mode 600, comments and unknown lines preserved), the
-  Z.ai platform selector, and buttons to run the Claude/Codex CLI logins
+  Z.ai platform selector, OpenCode Zen session fields, and buttons to run the
+  Claude/Codex CLI logins
 - **Display** — pinned provider, which window the panel shows, refresh interval,
   plus per-provider visibility switches and reordering arrows
 - **Backend** — the resolved CLI path, and buttons to run `ai-usage doctor` or
@@ -244,9 +282,9 @@ Python 3.10 needs the `tomli` backport for the Kimi CLI's TOML config; 3.11+ use
 the standard library's `tomllib`. Both are handled by the dependency list, and if
 neither is importable the TOML credential source is skipped rather than failing.
 
-Adding a provider means a class in `ai_usage/providers/` registered in
-`providers/__init__.py`, `config.py` and `cli.py`, then its name added to
-`PROVIDER_ORDER` in **both** extension variants (plus an icon and two CSS rules).
+Adding a provider means a class in `ai_usage/providers/`, one registry entry in
+`providers/__init__.py`, configuration metadata, then its name added to both
+extension variants (plus an icon and two CSS rules).
 
 ## License
 

@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-usage"
-version = "1.5.1"
-description = "Multi-provider usage metrics TUI for Claude, OpenAI, OpenRouter, Codex and Z.ai"
+version = "1.6.0"
+description = "Multi-provider usage metrics for Claude, Codex, Z.ai, Kimi, OpenCode, OpenRouter and Grok"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = ["tui", "usage", "metrics", "claude", "openai", "codex", "zai"]
+keywords = ["tui", "usage", "metrics", "claude", "openai", "codex", "zai", "opencode", "grok"]
 authors = [
     { name = "Cristiano" }
 ]

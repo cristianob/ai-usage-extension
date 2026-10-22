@@ -10,11 +10,23 @@ const SETTINGS_PATH = CONFIG_DIR + '/extension.json';
 
 const CLI_NAME = 'ai-usage';
 
-const PROVIDERS = ['claude', 'codex', 'zai', 'kimi', 'openrouter'];
+const PROVIDERS = [
+    'claude', 'codex', 'zai', 'kimi', 'opencode', 'opencode-go', 'openrouter', 'grok',
+];
+const PROVIDER_LABELS = {
+    claude: 'Claude Code', codex: 'OpenAI Codex', zai: 'Z.ai', kimi: 'Kimi Code',
+    opencode: 'OpenCode Zen', 'opencode-go': 'OpenCode Go', openrouter: 'OpenRouter',
+    grok: 'Grok Build',
+};
+const PROVIDER_CATALOG_VERSION = 2;
+/* Providers each catalog version introduced; migrating shows only the newer ones,
+ * so a provider the user hid is not switched back on. */
+const PROVIDERS_ADDED_IN_CATALOG = {1: ['opencode', 'opencode-go'], 2: ['grok']};
 
 const PANEL_WINDOWS = [
     {id: '5h', label: '5h only'},
     {id: '7d', label: '7d only'},
+    {id: '30d', label: '30d only'},
     {id: 'both', label: 'Both (5h · 7d)'},
 ];
 
@@ -39,11 +51,30 @@ const KEY_FIELDS = [
         link: 'https://www.kimi.com/code',
     },
     {
+        name: 'OPENCODE_API_KEY',
+        title: 'OpenCode Go API key',
+        subtitle: 'Optional - reads the opencode-go auth.json entry first',
+        link: 'https://opencode.ai',
+    },
+    {
+        name: 'OPENCODE_WORKSPACE_ID',
+        title: 'OpenCode Zen workspace ID',
+        subtitle: 'Workspace segment from /workspace/wrk_.../billing',
+        link: 'https://opencode.ai',
+    },
+    {
+        name: 'OPENCODE_AUTH_COOKIE',
+        title: 'OpenCode Zen auth cookie',
+        subtitle: "Value of opencode.ai's auth cookie; never share it",
+        link: null,
+    },
+    {
         name: 'OPENROUTER_API_KEY',
         title: 'OpenRouter API key',
         subtitle: 'Credits and spend limit',
         link: 'https://openrouter.ai/keys',
     },
+
     {
         name: 'CLAUDE_CODE_OAUTH_TOKEN',
         title: 'Claude OAuth token',
@@ -158,6 +189,26 @@ function _saveSettings(settings) {
     GLib.file_set_contents(SETTINGS_PATH, JSON.stringify(settings, null, 2));
 }
 
+function _migrateSettings(settings) {
+    let version = Number.isInteger(settings.providerCatalogVersion)
+        ? settings.providerCatalogVersion : 0;
+    if (version >= PROVIDER_CATALOG_VERSION)
+        return settings;
+    if (Array.isArray(settings.visibleProviders)) {
+        for (let [added, providers] of Object.entries(PROVIDERS_ADDED_IN_CATALOG)) {
+            if (Number(added) <= version)
+                continue;
+            for (let provider of providers) {
+                if (!settings.visibleProviders.includes(provider))
+                    settings.visibleProviders.push(provider);
+            }
+        }
+    }
+    settings.providerCatalogVersion = PROVIDER_CATALOG_VERSION;
+    _saveSettings(settings);
+    return settings;
+}
+
 /* Same rule as the extension: keep known names in their saved order, then
  * append anything the setting forgot. */
 function _sanitizeOrder(value) {
@@ -202,7 +253,7 @@ function init() {
 
 function fillPreferencesWindow(window) {
     const env = _loadEnv();
-    const settings = _loadSettings();
+    const settings = _migrateSettings(_loadSettings());
 
     let pendingEnv = {};
     let saveTimeout = null;
@@ -365,12 +416,12 @@ function fillPreferencesWindow(window) {
     const panelGroup = new Adw.PreferencesGroup({
         title: 'Panel',
         description: 'Providers with a single window show that one; money-based providers '
-            + '(OpenRouter) show the amount spent.',
+            + '(OpenCode Zen, OpenRouter) show a dollar amount.',
     });
 
     const providerRow = new Adw.ComboRow({
         title: 'Pinned provider',
-        model: Gtk.StringList.new(PROVIDERS),
+        model: Gtk.StringList.new(PROVIDERS.map(name => PROVIDER_LABELS[name])),
     });
     let providerIndex = PROVIDERS.indexOf(settings.panelProvider || 'claude');
     providerRow.selected = providerIndex === -1 ? 0 : providerIndex;
@@ -386,7 +437,7 @@ function fillPreferencesWindow(window) {
         model: Gtk.StringList.new(PANEL_WINDOWS.map(w => w.label)),
     });
     let windowIndex = PANEL_WINDOWS.findIndex(w => w.id === (settings.panelWindows || 'both'));
-    windowRow.selected = windowIndex === -1 ? 2 : windowIndex;
+    windowRow.selected = windowIndex === -1 ? 3 : windowIndex;
     windowRow.connect('notify::selected', () => {
         settings.panelWindows = PANEL_WINDOWS[windowRow.selected].id;
         _saveSettings(settings);
@@ -431,7 +482,7 @@ function fillPreferencesWindow(window) {
         providerRows = [];
 
         order.forEach((name, index) => {
-            let row = new Adw.ActionRow({title: name});
+            let row = new Adw.ActionRow({title: PROVIDER_LABELS[name] || name});
 
             let up = new Gtk.Button({
                 icon_name: 'go-up-symbolic',
